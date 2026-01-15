@@ -37,7 +37,8 @@ import {
   Search,
   Trash2,
   X,
-  AlertTriangle
+  AlertTriangle,
+  EyeOff
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -322,7 +323,7 @@ const ConfirmModal = ({
                 <p className="text-slate-300 mb-6">{message}</p>
                 <div className="flex justify-end gap-3">
                     <button onClick={onCancel} className="px-4 py-2 rounded bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors">Cancel</button>
-                    <button onClick={onConfirm} className="px-4 py-2 rounded bg-red-600 text-white font-bold hover:bg-red-500 transition-colors">Yes, Delete</button>
+                    <button onClick={onConfirm} className="px-4 py-2 rounded bg-red-600 text-white font-bold hover:bg-red-500 transition-colors">Confirm</button>
                 </div>
             </div>
         </div>
@@ -611,6 +612,32 @@ const App = () => {
     setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: true } : b));
     setBelts(updatedBelts); // Update belts state to reflect new champions immediately
     showNotification("Event Published! Rankings and Champions updated.");
+  };
+
+  const handleUnpublishEvent = (event: Event) => {
+      requestConfirmation("Unpublish this event? It will be hidden from the public and excluded from ranking calculations until republished. This allows you to edit the card.", async () => {
+          if(!user) return;
+          const batch = writeBatch(db);
+
+          // 1. Unpublish Event
+          batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: false });
+
+          // 2. Unpublish Bouts
+          const eventBouts = bouts.filter(b => b.event_id === event.id);
+          const updatedBouts = [...bouts];
+
+          eventBouts.forEach(b => {
+              const boutRef = doc(db, 'artifacts', appId, 'public', 'data', 'bouts', b.id);
+              batch.update(boutRef, { is_published: false });
+          });
+
+          await batch.commit();
+
+          // Local State Update
+          setEvents(events.map(e => e.id === event.id ? { ...e, is_published: false } : e));
+          setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: false } : b));
+          showNotification("Event Unpublished. You can now edit the card.");
+      });
   };
 
   // --- THE RANKING ENGINE ---
@@ -1639,7 +1666,12 @@ const App = () => {
                       </button>
                       <h2 className="text-2xl font-bold text-white">{evt.name} Fight Card</h2>
                       {evt.is_published ? (
-                          <span className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-xs border border-green-500/30">PUBLISHED</span>
+                          <div className="flex items-center gap-2">
+                              <span className="bg-green-500/20 text-green-400 px-2 py-1 rounded text-xs border border-green-500/30">PUBLISHED</span>
+                              <button onClick={() => handleUnpublishEvent(evt)} className="text-slate-400 hover:text-yellow-500 transition-colors" title="Unpublish Event">
+                                  <EyeOff className="w-4 h-4"/>
+                              </button>
+                          </div>
                       ) : (
                           <button onClick={() => handlePublishEvent(evt)} className="bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded text-sm flex items-center gap-2">
                               <Check className="w-3 h-3"/> Publish Event
@@ -1647,7 +1679,7 @@ const App = () => {
                       )}
                   </div>
 
-                  {/* Bout Entry */}
+                  {/* Bout Entry - Only visible if unpublished */}
                   {!evt.is_published && (
                       <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
                           <h3 className="text-white font-bold mb-4">Add Bout</h3>
@@ -1761,6 +1793,10 @@ const App = () => {
       // Filter fighters by selected criteria
       const availableFighters = fighters.filter(f => f.sport === bout.sport && f.gender === bout.gender);
       
+      // Filter out selected fighters so they can't fight themselves
+      const availableRedFighters = availableFighters.filter(f => f.id !== bout.blue_fighter_id);
+      const availableBlueFighters = availableFighters.filter(f => f.id !== bout.red_fighter_id);
+      
       // Filter available belts
       const availableBelts = belts.filter(b => b.promotion_id === event.promotion_id && b.sport === bout.sport && b.gender === bout.gender && b.weight_class === bout.weight_class);
 
@@ -1797,14 +1833,14 @@ const App = () => {
                       <label className="text-red-400 text-xs font-bold uppercase mb-1 block">Red Corner</label>
                       <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={bout.red_fighter_id || ''} onChange={e => setBout({...bout, red_fighter_id: e.target.value})}>
                           <option value="">Select Fighter</option>
-                          {availableFighters.map(f => <option key={f.id} value={f.id}>{f.fighter_name}</option>)}
+                          {availableRedFighters.map(f => <option key={f.id} value={f.id}>{f.fighter_name}</option>)}
                       </select>
                   </div>
                   <div className="bg-blue-900/20 p-4 rounded border border-blue-900/50">
                       <label className="text-blue-400 text-xs font-bold uppercase mb-1 block">Blue Corner</label>
                       <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={bout.blue_fighter_id || ''} onChange={e => setBout({...bout, blue_fighter_id: e.target.value})}>
                           <option value="">Select Fighter</option>
-                          {availableFighters.map(f => <option key={f.id} value={f.id}>{f.fighter_name}</option>)}
+                          {availableBlueFighters.map(f => <option key={f.id} value={f.id}>{f.fighter_name}</option>)}
                       </select>
                   </div>
               </div>
