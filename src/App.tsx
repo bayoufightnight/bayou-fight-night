@@ -1562,7 +1562,7 @@ const App = () => {
             <div className="mt-8 pt-8 border-t border-slate-700">
                 <h3 className="text-white font-bold mb-4">Recent Registrations</h3>
                 <div className="space-y-2">
-                    {fighters.slice().reverse().map(f => (
+                    {fighters.slice(-5).reverse().map(f => (
                         <div key={f.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group">
                             <div>
                                 <span className="text-white font-medium">{f.fighter_name}</span>
@@ -1683,7 +1683,7 @@ const App = () => {
                   {!evt.is_published && (
                       <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
                           <h3 className="text-white font-bold mb-4">Add Bout</h3>
-                          <BoutEntryForm event={evt} onAdd={handleAddBout} fighters={fighters} />
+                          <BoutEntryForm event={evt} onAdd={handleAddBout} fighters={fighters} existingBouts={evtBouts} />
                       </div>
                   )}
 
@@ -1784,16 +1784,23 @@ const App = () => {
       );
   };
 
-  const BoutEntryForm = ({ event, onAdd, fighters }: { event: Event, onAdd: (b: Partial<Bout>) => void, fighters: Fighter[] }) => {
+  const BoutEntryForm = ({ event, onAdd, fighters, existingBouts }: { event: Event, onAdd: (b: Partial<Bout>) => void, fighters: Fighter[], existingBouts: Bout[] }) => {
       const [bout, setBout] = useState<Partial<Bout>>({ 
           sport: 'mma', gender: 'men', weight_class: WEIGHT_CLASSES['mma']['men'][0],
           event_id: event.id
       });
 
-      // Filter fighters by selected criteria
-      const availableFighters = fighters.filter(f => f.sport === bout.sport && f.gender === bout.gender);
+      // 1. Get IDs of fighters already booked on this card
+      const bookedFighterIds = new Set(existingBouts.flatMap(b => [b.red_fighter_id, b.blue_fighter_id]));
+
+      // 2. Filter base list: Match criteria AND not already booked
+      const availableFighters = fighters.filter(f => 
+          f.sport === bout.sport && 
+          f.gender === bout.gender &&
+          !bookedFighterIds.has(f.id)
+      );
       
-      // Filter out selected fighters so they can't fight themselves
+      // 3. Filter specific dropdowns to prevent self-match
       const availableRedFighters = availableFighters.filter(f => f.id !== bout.blue_fighter_id);
       const availableBlueFighters = availableFighters.filter(f => f.id !== bout.red_fighter_id);
       
