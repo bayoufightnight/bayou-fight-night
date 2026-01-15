@@ -12,7 +12,8 @@ import {
   collection, 
   doc, 
   getDocs, 
-  addDoc, 
+  addDoc,
+  deleteDoc, 
   writeBatch
 } from 'firebase/firestore';
 import { 
@@ -32,7 +33,11 @@ import {
   Minus, 
   Crown, 
   MapPin,
-  Dumbbell
+  Dumbbell,
+  Search,
+  Trash2,
+  X,
+  AlertTriangle
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -54,12 +59,11 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// --- Types & Interfaces (Matching Spec Appendix A) ---
+// --- Types & Interfaces ---
 
 type Sport = 'mma' | 'kickboxing' | 'grappling' | 'bare_knuckle_boxing';
 type Gender = 'men' | 'women';
 type FighterLevel = 'pro' | 'am';
-// BoutResult removed as it was unused
 type BoutMethod = 'ko_tko' | 'submission' | 'ud' | 'md_td' | 'sd' | 'dq_doctor' | 'draw' | 'nc';
 
 interface Fighter {
@@ -147,7 +151,7 @@ interface RankingSnapshot {
   previous_rank?: number;
 }
 
-// --- Constants (Spec Appendix D) ---
+// --- Constants ---
 
 const START_RATING_PRO = 1500;
 const START_RATING_AM = 1450;
@@ -295,11 +299,69 @@ const LoadingSpinner = () => (
   </div>
 );
 
+// Custom Modal Component to replace window.confirm
+const ConfirmModal = ({ 
+    isOpen, 
+    message, 
+    onConfirm, 
+    onCancel 
+}: { 
+    isOpen: boolean; 
+    message: string; 
+    onConfirm: () => void; 
+    onCancel: () => void 
+}) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4">
+            <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+                <div className="flex items-center gap-3 text-yellow-500 mb-4">
+                    <AlertTriangle className="w-6 h-6"/>
+                    <h3 className="text-lg font-bold text-white">Confirm Action</h3>
+                </div>
+                <p className="text-slate-300 mb-6">{message}</p>
+                <div className="flex justify-end gap-3">
+                    <button onClick={onCancel} className="px-4 py-2 rounded bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors">Cancel</button>
+                    <button onClick={onConfirm} className="px-4 py-2 rounded bg-red-600 text-white font-bold hover:bg-red-500 transition-colors">Yes, Delete</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Custom Toast Component to replace window.alert
+const NotificationToast = ({ 
+    message, 
+    type, 
+    onClose 
+}: { 
+    message: string; 
+    type: 'success' | 'error'; 
+    onClose: () => void 
+}) => {
+    useEffect(() => {
+        const timer = setTimeout(onClose, 3000);
+        return () => clearTimeout(timer);
+    }, [onClose]);
+
+    return (
+        <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-2xl z-[100] flex items-center gap-3 animate-in slide-in-from-bottom-2 fade-in duration-300 ${type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+            {type === 'success' ? <Check className="w-5 h-5"/> : <AlertTriangle className="w-5 h-5"/>}
+            <span className="font-bold">{message}</span>
+        </div>
+    );
+};
+
 const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [activeTab, setActiveTab] = useState('rankings'); // rankings, events, admin_dashboard
+  const [searchQuery, setSearchQuery] = useState('');
   
+  // Modal & Notification State
+  const [modalConfig, setModalConfig] = useState<{isOpen: boolean, message: string, onConfirm: () => void} | null>(null);
+  const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+
   // Navigation State
   const [publicEventId, setPublicEventId] = useState<string | null>(null); 
   const [viewingFighterId, setViewingFighterId] = useState<string | null>(null);
@@ -320,6 +382,22 @@ const App = () => {
   const [selectedSport, setSelectedSport] = useState<Sport>('mma');
   const [selectedGender, setSelectedGender] = useState<Gender>('men');
   const [selectedWeightClass, setSelectedWeightClass] = useState<string>(WEIGHT_CLASSES['mma']['men'][3]); 
+
+  // --- Helpers ---
+  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+      setNotification({ message, type });
+  };
+
+  const requestConfirmation = (message: string, action: () => void) => {
+      setModalConfig({
+          isOpen: true,
+          message,
+          onConfirm: () => {
+              action();
+              setModalConfig(null);
+          }
+      });
+  };
 
   // --- Auth & Data Fetching ---
 
@@ -394,6 +472,16 @@ const App = () => {
     
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'fighters'), newFighter);
     setFighters([...fighters, { ...newFighter, id: docRef.id } as Fighter]);
+    showNotification("Fighter added successfully!");
+  };
+
+  const handleDeleteFighter = (id: string) => {
+      requestConfirmation("Are you sure you want to delete this fighter? This action cannot be undone.", async () => {
+          if (!user) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', id));
+          setFighters(fighters.filter(f => f.id !== id));
+          showNotification("Fighter deleted.");
+      });
   };
 
   const handleCreateEvent = async (data: Partial<Event>) => {
@@ -410,6 +498,16 @@ const App = () => {
     };
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), newEvent);
     setEvents([...events, { ...newEvent, id: docRef.id } as Event]);
+    showNotification("Event draft created.");
+  };
+
+  const handleDeleteEvent = (id: string) => {
+      requestConfirmation("Delete this event? Bouts linked to it will remain in the database but be hidden.", async () => {
+          if(!user) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'events', id));
+          setEvents(events.filter(e => e.id !== id));
+          showNotification("Event deleted.");
+      });
   };
 
   const handleCreateBelt = async (data: Partial<Belt>) => {
@@ -425,8 +523,17 @@ const App = () => {
       };
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'belts'), newBelt);
       setBelts([...belts, { ...newBelt, id: docRef.id }]);
-      alert("Belt Created Successfully!");
+      showNotification("Belt Created Successfully!");
   };
+
+  const handleDeleteBelt = (id: string) => {
+      requestConfirmation("Delete this championship belt?", async () => {
+          if(!user) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'belts', id));
+          setBelts(belts.filter(b => b.id !== id));
+          showNotification("Belt deleted.");
+      });
+  }
 
   const handleAddBout = async (boutData: Partial<Bout>) => {
     if(!user) return;
@@ -452,6 +559,16 @@ const App = () => {
 
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bouts'), newBout);
     setBouts([...bouts, { ...newBout, id: docRef.id } as Bout]);
+    showNotification("Bout added to card.");
+  };
+
+  const handleDeleteBout = (id: string) => {
+      requestConfirmation("Remove this bout from the card?", async () => {
+          if(!user) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', id));
+          setBouts(bouts.filter(b => b.id !== id));
+          showNotification("Bout removed.");
+      });
   };
 
   const handlePublishEvent = async (event: Event) => {
@@ -493,7 +610,7 @@ const App = () => {
     setEvents(events.map(e => e.id === event.id ? { ...e, is_published: true } : e));
     setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: true } : b));
     setBelts(updatedBelts); // Update belts state to reflect new champions immediately
-    alert("Event Published! Rankings and Champions updated.");
+    showNotification("Event Published! Rankings and Champions updated.");
   };
 
   // --- THE RANKING ENGINE ---
@@ -615,81 +732,83 @@ const App = () => {
     await batch.commit();
     setRankings(newSnapshots);
     setLoading(false);
-    alert("Rankings Updated: Movement indicators calculated.");
+    showNotification("Rankings Updated: Movement indicators calculated.");
   };
 
   const seedData = async () => {
-      if(!user) return;
-      const batch = writeBatch(db);
-      const promoId = "promo-1";
-      const gymId = "gym-1";
-      const beltId = "belt-lightweight";
-      
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', promoId), {
-          id: promoId, name: 'Bayou Fight Night', slug: 'bayou-fight-night', region: 'Louisiana'
-      });
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'gyms', gymId), {
-          id: gymId, name: 'Gladiators Academy', slug: 'gladiators-academy', city: 'Lafayette', state: 'LA'
-      });
+      requestConfirmation("This will RESET and SEED demo data. Continue?", async () => {
+          if(!user) return;
+          const batch = writeBatch(db);
+          const promoId = "promo-1";
+          const gymId = "gym-1";
+          const beltId = "belt-lightweight";
+          
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', promoId), {
+              id: promoId, name: 'Bayou Fight Night', slug: 'bayou-fight-night', region: 'Louisiana'
+          });
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'gyms', gymId), {
+              id: gymId, name: 'Gladiators Academy', slug: 'gladiators-academy', city: 'Lafayette', state: 'LA'
+          });
 
-      const fightersList = [
-        { id: 'f1', first: 'Dustin', last: 'Poirier' },
-        { id: 'f2', first: 'Justin', last: 'Gaethje' },
-        { id: 'f3', first: 'Charles', last: 'Oliveira' },
-        { id: 'f4', first: 'Islam', last: 'Makhachev' },
-      ];
+          const fightersList = [
+            { id: 'f1', first: 'Dustin', last: 'Poirier' },
+            { id: 'f2', first: 'Justin', last: 'Gaethje' },
+            { id: 'f3', first: 'Charles', last: 'Oliveira' },
+            { id: 'f4', first: 'Islam', last: 'Makhachev' },
+          ];
 
-      fightersList.forEach(f => {
-         const name = `${f.first} ${f.last}`;
-         batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', f.id), {
-              id: f.id, first_name: f.first, last_name: f.last, fighter_name: name, slug: slugify(name),
-              sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)', gym_id: gymId, active_status: 'active', fighter_level: 'pro', is_published: true
-         });
-      });
+          fightersList.forEach(f => {
+             const name = `${f.first} ${f.last}`;
+             batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', f.id), {
+                  id: f.id, first_name: f.first, last_name: f.last, fighter_name: name, slug: slugify(name),
+                  sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)', gym_id: gymId, active_status: 'active', fighter_level: 'pro', is_published: true
+             });
+          });
 
-      // Create Belt - Islam (f4) wins it in Bout 3 below
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'belts', beltId), {
-          id: beltId,
-          promotion_id: promoId,
-          name: 'BFN Lightweight World Championship',
-          sport: 'mma',
-          gender: 'men',
-          weight_class: 'Lightweight (155)',
-          current_champion_id: 'f4',
-          is_active: true
-      });
+          // Create Belt - Islam (f4) wins it in Bout 3 below
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'belts', beltId), {
+              id: beltId,
+              promotion_id: promoId,
+              name: 'BFN Lightweight World Championship',
+              sport: 'mma',
+              gender: 'men',
+              weight_class: 'Lightweight (155)',
+              current_champion_id: 'f4',
+              is_active: true
+          });
 
-      const evt1Id = 'evt-seed-1';
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'events', evt1Id), {
-          id: evt1Id, promotion_id: promoId, name: 'BFN 1: Origins', slug: 'bfn-1', event_date: '2023-06-01', venue: 'Cajundome', city: 'Lafayette', state: 'LA', is_published: true
-      });
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b1'), {
-          id: 'b1', event_id: evt1Id, bout_order: 1, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
-          red_fighter_id: 'f1', blue_fighter_id: 'f2', winner_id: 'f1', method: 'ko_tko', is_title_bout: false, is_published: true
-      });
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b2'), {
-          id: 'b2', event_id: evt1Id, bout_order: 2, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
-          red_fighter_id: 'f3', blue_fighter_id: 'f4', winner_id: 'f4', method: 'submission', is_title_bout: false, is_published: true
-      });
+          const evt1Id = 'evt-seed-1';
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'events', evt1Id), {
+              id: evt1Id, promotion_id: promoId, name: 'BFN 1: Origins', slug: 'bfn-1', event_date: '2023-06-01', venue: 'Cajundome', city: 'Lafayette', state: 'LA', is_published: true
+          });
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b1'), {
+              id: 'b1', event_id: evt1Id, bout_order: 1, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
+              red_fighter_id: 'f1', blue_fighter_id: 'f2', winner_id: 'f1', method: 'ko_tko', is_title_bout: false, is_published: true
+          });
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b2'), {
+              id: 'b2', event_id: evt1Id, bout_order: 2, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
+              red_fighter_id: 'f3', blue_fighter_id: 'f4', winner_id: 'f4', method: 'submission', is_title_bout: false, is_published: true
+          });
 
-      const evt2Id = 'evt-seed-2';
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'events', evt2Id), {
-          id: evt2Id, promotion_id: promoId, name: 'BFN 2: Heat', slug: 'bfn-2', event_date: '2023-09-01', venue: 'UNO Lakefront', city: 'New Orleans', state: 'LA', is_published: true
+          const evt2Id = 'evt-seed-2';
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'events', evt2Id), {
+              id: evt2Id, promotion_id: promoId, name: 'BFN 2: Heat', slug: 'bfn-2', event_date: '2023-09-01', venue: 'UNO Lakefront', city: 'New Orleans', state: 'LA', is_published: true
+          });
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b3'), {
+              id: 'b3', event_id: evt2Id, bout_order: 1, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
+              red_fighter_id: 'f1', blue_fighter_id: 'f4', winner_id: 'f4', method: 'ud', 
+              is_title_bout: true, belt_id: beltId, // Link belt to the title fight
+              is_published: true
+          });
+          batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b4'), {
+              id: 'b4', event_id: evt2Id, bout_order: 2, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
+              red_fighter_id: 'f2', blue_fighter_id: 'f3', winner_id: 'f3', method: 'submission', is_title_bout: false, is_published: true
+          });
+          
+          await batch.commit();
+          showNotification("Seed Data Injected. Reloading...");
+          setTimeout(() => window.location.reload(), 1000);
       });
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b3'), {
-          id: 'b3', event_id: evt2Id, bout_order: 1, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
-          red_fighter_id: 'f1', blue_fighter_id: 'f4', winner_id: 'f4', method: 'ud', 
-          is_title_bout: true, belt_id: beltId, // Link belt to the title fight
-          is_published: true
-      });
-      batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', 'b4'), {
-          id: 'b4', event_id: evt2Id, bout_order: 2, sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)',
-          red_fighter_id: 'f2', blue_fighter_id: 'f3', winner_id: 'f3', method: 'submission', is_title_bout: false, is_published: true
-      });
-      
-      await batch.commit();
-      alert("Seed Data Injected (Fighters, Events, Belts). Reloading...");
-      window.location.reload();
   };
 
 
@@ -1233,6 +1352,62 @@ const App = () => {
     );
   };
 
+  const SearchResults = () => {
+      const results = {
+          fighters: fighters.filter(f => f.fighter_name.toLowerCase().includes(searchQuery.toLowerCase())),
+          events: events.filter(e => e.name.toLowerCase().includes(searchQuery.toLowerCase())),
+          gyms: gyms.filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      };
+
+      if (!searchQuery) return null;
+
+      return (
+          <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Search className="text-yellow-500"/> Search Results: "{searchQuery}"</h2>
+              
+              {results.fighters.length > 0 && (
+                  <div className="space-y-2">
+                      <h3 className="text-slate-400 uppercase font-bold text-sm">Fighters</h3>
+                      {results.fighters.map(f => (
+                          <div key={f.id} onClick={() => { setViewingFighterId(f.id); setSearchQuery(''); }} className="bg-slate-800 p-4 rounded flex items-center justify-between cursor-pointer hover:bg-slate-700">
+                              <div className="font-bold text-white">{f.fighter_name}</div>
+                              <div className="text-xs text-slate-400">{f.weight_class}</div>
+                          </div>
+                      ))}
+                  </div>
+              )}
+
+              {results.events.length > 0 && (
+                  <div className="space-y-2">
+                      <h3 className="text-slate-400 uppercase font-bold text-sm">Events</h3>
+                      {results.events.map(e => (
+                          <div key={e.id} onClick={() => { setPublicEventId(e.id); setSearchQuery(''); }} className="bg-slate-800 p-4 rounded flex items-center justify-between cursor-pointer hover:bg-slate-700">
+                              <div className="font-bold text-white">{e.name}</div>
+                              <div className="text-xs text-slate-400">{e.event_date}</div>
+                          </div>
+                      ))}
+                  </div>
+              )}
+
+              {results.gyms.length > 0 && (
+                  <div className="space-y-2">
+                      <h3 className="text-slate-400 uppercase font-bold text-sm">Gyms</h3>
+                      {results.gyms.map(g => (
+                          <div key={g.id} onClick={() => { setViewingGymId(g.id); setSearchQuery(''); }} className="bg-slate-800 p-4 rounded flex items-center justify-between cursor-pointer hover:bg-slate-700">
+                              <div className="font-bold text-white">{g.name}</div>
+                              <div className="text-xs text-slate-400">{g.city}</div>
+                          </div>
+                      ))}
+                  </div>
+              )}
+
+              {results.fighters.length === 0 && results.events.length === 0 && results.gyms.length === 0 && (
+                  <div className="p-8 text-center text-slate-500">No results found.</div>
+              )}
+          </div>
+      );
+  }
+
   // --- ADMIN COMPONENTS ---
 
   const AdminDashboard = () => (
@@ -1360,10 +1535,15 @@ const App = () => {
             <div className="mt-8 pt-8 border-t border-slate-700">
                 <h3 className="text-white font-bold mb-4">Recent Registrations</h3>
                 <div className="space-y-2">
-                    {fighters.slice(-5).reverse().map(f => (
-                        <div key={f.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded">
-                            <span className="text-white font-medium">{f.fighter_name}</span>
-                            <span className="text-xs text-slate-400">{f.sport.toUpperCase()} • {f.weight_class}</span>
+                    {fighters.slice().reverse().map(f => (
+                        <div key={f.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group">
+                            <div>
+                                <span className="text-white font-medium">{f.fighter_name}</span>
+                                <span className="text-xs text-slate-400 block">{f.sport.toUpperCase()} • {f.weight_class}</span>
+                            </div>
+                            <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Trash2 className="w-4 h-4"/>
+                            </button>
                         </div>
                     ))}
                 </div>
@@ -1416,19 +1596,24 @@ const App = () => {
                 <h3 className="text-white font-bold mb-4">Active Titles</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {belts.map(b => (
-                        <div key={b.id} className="flex justify-between items-center bg-slate-700/50 p-4 rounded border border-slate-600">
+                        <div key={b.id} className="flex justify-between items-center bg-slate-700/50 p-4 rounded border border-slate-600 group">
                             <div>
                                 <div className="text-yellow-500 font-bold flex items-center gap-2"><Crown className="w-4 h-4"/> {b.name}</div>
                                 <div className="text-xs text-slate-400">{b.sport.toUpperCase()} • {b.weight_class}</div>
                             </div>
-                            {b.current_champion_id ? (
-                                <div className="text-right">
-                                    <div className="text-xs text-slate-400 uppercase">Champion</div>
-                                    <div className="text-white font-bold">{fighters.find(f => f.id === b.current_champion_id)?.fighter_name}</div>
-                                </div>
-                            ) : (
-                                <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">VACANT</span>
-                            )}
+                            <div className="flex items-center gap-4">
+                                {b.current_champion_id ? (
+                                    <div className="text-right">
+                                        <div className="text-xs text-slate-400 uppercase">Champion</div>
+                                        <div className="text-white font-bold">{fighters.find(f => f.id === b.current_champion_id)?.fighter_name}</div>
+                                    </div>
+                                ) : (
+                                    <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">VACANT</span>
+                                )}
+                                <button onClick={() => handleDeleteBelt(b.id)} className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Trash2 className="w-4 h-4"/>
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -1476,7 +1661,7 @@ const App = () => {
                           const red = fighters.find(f => f.id === bout.red_fighter_id);
                           const blue = fighters.find(f => f.id === bout.blue_fighter_id);
                           return (
-                              <div key={bout.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between">
+                              <div key={bout.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between group">
                                   <div className="flex items-center gap-4">
                                       <span className="text-slate-500 font-mono font-bold text-lg">#{idx + 1}</span>
                                       <div className="flex flex-col">
@@ -1488,10 +1673,17 @@ const App = () => {
                                           </div>
                                       </div>
                                   </div>
-                                  <div className="text-right flex flex-col items-end">
-                                      <div className="text-white text-sm font-medium">{bout.method ? bout.method.toUpperCase().replace('_', '/') : 'PENDING'}</div>
-                                      {bout.winner_id && <div className="text-xs text-yellow-500">Winner: {bout.winner_id === red?.id ? red?.fighter_name : blue?.fighter_name}</div>}
-                                      {bout.is_title_bout && <span className="text-[10px] flex items-center gap-1 text-yellow-500 mt-1"><Crown className="w-3 h-3"/> Title Fight</span>}
+                                  <div className="flex items-center gap-4">
+                                      <div className="text-right flex flex-col items-end">
+                                          <div className="text-white text-sm font-medium">{bout.method ? bout.method.toUpperCase().replace('_', '/') : 'PENDING'}</div>
+                                          {bout.winner_id && <div className="text-xs text-yellow-500">Winner: {bout.winner_id === red?.id ? red?.fighter_name : blue?.fighter_name}</div>}
+                                          {bout.is_title_bout && <span className="text-[10px] flex items-center gap-1 text-yellow-500 mt-1"><Crown className="w-3 h-3"/> Title Fight</span>}
+                                      </div>
+                                      {!evt.is_published && (
+                                          <button onClick={() => handleDeleteBout(bout.id)} className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                              <Trash2 className="w-4 h-4"/>
+                                          </button>
+                                      )}
                                   </div>
                               </div>
                           )
@@ -1526,25 +1718,33 @@ const App = () => {
               <div className="space-y-4">
                   <h3 className="text-white font-bold">Draft Events</h3>
                   {events.filter(e => !e.is_published).map(e => (
-                      <div key={e.id} onClick={() => setViewingEvent(e.id)} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors flex justify-between items-center">
-                          <div>
+                      <div key={e.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors flex justify-between items-center group">
+                          <div onClick={() => setViewingEvent(e.id)} className="flex-1">
                               <div className="font-bold text-white">{e.name}</div>
                               <div className="text-xs text-slate-400">{e.event_date} • {e.venue}</div>
                           </div>
-                          <ChevronRight className="text-slate-600"/>
+                          <div className="flex items-center gap-2">
+                              <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Trash2 className="w-4 h-4"/>
+                              </button>
+                              <ChevronRight className="text-slate-600"/>
+                          </div>
                       </div>
                   ))}
                   
                   <h3 className="text-white font-bold pt-6">Published Events</h3>
                   {events.filter(e => e.is_published).map(e => (
-                      <div key={e.id} onClick={() => setViewingEvent(e.id)} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors opacity-75">
-                          <div className="flex justify-between items-center">
+                      <div key={e.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors opacity-75">
+                          <div onClick={() => setViewingEvent(e.id)} className="flex justify-between items-center flex-1">
                             <div>
                                 <div className="font-bold text-white">{e.name}</div>
                                 <div className="text-xs text-slate-400">{e.event_date}</div>
                             </div>
-                            <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded">Live</span>
+                            <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded mr-4">Live</span>
                           </div>
+                          <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Trash2 className="w-4 h-4"/>
+                          </button>
                       </div>
                   ))}
               </div>
@@ -1640,14 +1840,18 @@ const App = () => {
   // --- Layout ---
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-yellow-500/30">
+    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-yellow-500/30 relative">
+      {/* Global Modal & Notification */}
+      {modalConfig && <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.onConfirm} onCancel={() => setModalConfig(null)} />}
+      {notification && <NotificationToast message={notification.message} type={notification.type} onClose={() => setNotification(null)} />}
+
       {/* Navigation */}
       <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between h-20">
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-6 flex-1">
                {/* Logo & Branding */}
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setSearchQuery(''); setActiveTab('rankings'); setPublicEventId(null); setViewingFighterId(null); }}>
                  <div className="w-12 h-12 bg-black rounded-full border border-slate-700 overflow-hidden flex items-center justify-center">
                     {/* Updated Logo URL */}
                     <img src="https://drive.google.com/uc?export=view&id=1ucjGjhPycGWUhkgNUujXeExL0ZlgBAmO" alt="BFN Logo" className="w-full h-full object-cover" onError={(e) => {
@@ -1658,8 +1862,8 @@ const App = () => {
                     <Shield className="w-6 h-6 text-black hidden" fill="currentColor" /> 
                  </div>
                  <div className="flex flex-col">
-                    <span className="text-2xl font-black tracking-tighter text-white italic leading-none">BAYOU FIGHT NIGHT</span>
-                    <span className="text-[10px] text-yellow-500 uppercase tracking-widest font-bold">Built on the Bayou. Proven in the Cage.</span>
+                    <span className="text-2xl font-black tracking-tighter text-white italic leading-none hidden md:block">BAYOU FIGHT NIGHT</span>
+                    <span className="text-[10px] text-yellow-500 uppercase tracking-widest font-bold hidden md:block">Built on the Bayou. Proven in the Cage.</span>
                  </div>
               </div>
               
@@ -1670,8 +1874,9 @@ const App = () => {
                         setActiveTab('rankings');
                         setViewingFighterId(null);
                         setViewingGymId(null);
+                        setSearchQuery('');
                     }} 
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'rankings' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'rankings' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
                   >
                     Rankings
                   </button>
@@ -1680,23 +1885,43 @@ const App = () => {
                         setActiveTab('events');
                         setPublicEventId(null);
                         setViewingPromoId(null);
+                        setSearchQuery('');
                     }} 
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'events' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'events' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
                   >
                     Events
                   </button>
                 </div>
               )}
+
+              {/* SEARCH BAR */}
+              <div className="flex-1 max-w-md ml-4 relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Search className="h-4 w-4 text-slate-500" />
+                  </div>
+                  <input 
+                      type="text"
+                      className="bg-slate-800 border border-slate-700 text-white text-sm rounded-full block w-full pl-10 p-2.5 focus:border-yellow-500 outline-none transition-colors"
+                      placeholder="Search fighters, events, gyms..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                      <button onClick={() => setSearchQuery('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-white">
+                          <X className="h-4 w-4"/>
+                      </button>
+                  )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 ml-4">
                {isAdminMode ? (
-                   <button onClick={() => { setIsAdminMode(false); setActiveTab('rankings'); }} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors">
+                   <button onClick={() => { setIsAdminMode(false); setActiveTab('rankings'); setSearchQuery(''); }} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors">
                        EXIT ADMIN
                    </button>
                ) : (
-                   <button onClick={() => { setIsAdminMode(true); setActiveTab('admin_dashboard'); }} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-                       <Lock className="w-4 h-4"/> <span className="text-xs font-bold">STAFF</span>
+                   <button onClick={() => { setIsAdminMode(true); setActiveTab('admin_dashboard'); setSearchQuery(''); }} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+                       <Lock className="w-4 h-4"/> <span className="text-xs font-bold hidden md:inline">STAFF</span>
                    </button>
                )}
             </div>
@@ -1708,6 +1933,8 @@ const App = () => {
       <main className="max-w-7xl mx-auto px-4 py-8">
         {loading ? (
             <LoadingSpinner />
+        ) : searchQuery ? (
+            <SearchResults />
         ) : (
             <>
                 {/* Admin Mode Header */}
