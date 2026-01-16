@@ -846,9 +846,23 @@ const App = () => {
     if (viewingFighterId) return renderFighterProfile(viewingFighterId);
     if (viewingGymId) return renderGymProfile(viewingGymId);
 
+    // FIX: Filter by latest date to avoid duplicate entries from history
+    const latestDate = rankings.length > 0 
+        ? rankings.reduce((max, r) => (r.as_of_date > max ? r.as_of_date : max), '') 
+        : '';
+
+    // Deduplicate logic: use a Set to track seen fighter IDs for the current day
+    const seenFighters = new Set<string>();
+
     const filtered = rankings
+        .filter(r => r.as_of_date === latestDate)
         .filter(r => r.sport === selectedSport && r.gender === selectedGender && r.weight_class === selectedWeightClass)
-        .sort((a,b) => a.rank - b.rank);
+        .sort((a,b) => a.rank - b.rank)
+        .filter(r => {
+            if (seenFighters.has(r.fighter_id)) return false;
+            seenFighters.add(r.fighter_id);
+            return true;
+        });
 
     return (
       <div className="space-y-6">
