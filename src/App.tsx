@@ -44,8 +44,7 @@ import {
   LogOut,
   Download,
   Upload,
-  FileJson,
-  Database
+  Building2
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -635,6 +634,29 @@ const App = () => {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', id));
           setFighters(fighters.filter(f => f.id !== id));
           showNotification("Fighter deleted.");
+      });
+  };
+
+  // --- GYM ACTIONS ---
+  const handleCreateGym = async (data: Partial<Gym>) => {
+      if (!user || user.isAnonymous) return;
+      const newGym: any = {
+          name: data.name!,
+          slug: slugify(data.name!),
+          city: data.city || '',
+          state: data.state || 'LA'
+      };
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'gyms'), newGym);
+      setGyms([...gyms, { ...newGym, id: docRef.id } as Gym]);
+      showNotification("Gym registered successfully!");
+  };
+
+  const handleDeleteGym = (id: string) => {
+      requestConfirmation("Delete this gym? Fighters linked to it will need to be updated.", async () => {
+          if(!user || user.isAnonymous) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gyms', id));
+          setGyms(gyms.filter(g => g.id !== id));
+          showNotification("Gym deleted.");
       });
   };
 
@@ -1617,6 +1639,10 @@ const App = () => {
                    <span className="text-white">Recorded Bouts</span>
                    <span className="bg-slate-700 text-yellow-500 px-2 py-1 rounded text-sm font-mono">{bouts.length}</span>
                </div>
+               <div className="flex justify-between items-center">
+                   <span className="text-white">Gyms</span>
+                   <span className="bg-slate-700 text-yellow-500 px-2 py-1 rounded text-sm font-mono">{gyms.length}</span>
+               </div>
            </div>
        </div>
 
@@ -1643,6 +1669,13 @@ const App = () => {
                    <div>
                        <div className="font-bold">Belt Manager</div>
                        <div className="text-xs text-slate-400">Create & Assign Titles</div>
+                   </div>
+               </button>
+               <button onClick={() => setActiveTab('admin_gyms')} className="w-full flex items-center gap-3 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors text-left">
+                   <Building2 className="w-5 h-5 text-yellow-500"/>
+                   <div>
+                       <div className="font-bold">Register Gym</div>
+                       <div className="text-xs text-slate-400">Add a new training center</div>
                    </div>
                </button>
            </div>
@@ -1694,6 +1727,81 @@ const App = () => {
        </div>
     </div>
   );
+
+  const AdminGymManager = () => {
+    const [form, setForm] = useState<Partial<Gym>>({ state: 'LA' });
+
+    return (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-white">Gym Registry</h2>
+                <button onClick={() => setForm({ state: 'LA' })} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="space-y-4">
+                    <input 
+                        className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" 
+                        placeholder="Gym Name (e.g. Gladiators Academy)" 
+                        value={form.name || ''} 
+                        onChange={e => setForm({...form, name: e.target.value})} 
+                    />
+                </div>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <input 
+                            className="bg-slate-700 border border-slate-600 text-white rounded p-2" 
+                            placeholder="City" 
+                            value={form.city || ''} 
+                            onChange={e => setForm({...form, city: e.target.value})} 
+                        />
+                        <input 
+                            className="bg-slate-700 border border-slate-600 text-white rounded p-2" 
+                            placeholder="State" 
+                            value={form.state || ''} 
+                            onChange={e => setForm({...form, state: e.target.value})} 
+                        />
+                    </div>
+                </div>
+            </div>
+
+            <button 
+                onClick={() => { handleCreateGym(form); setForm({ state: 'LA' }); }} 
+                className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2"
+                disabled={!form.name}
+            >
+                <Plus className="w-4 h-4"/> Register Gym
+            </button>
+
+            <div className="mt-8 pt-8 border-t border-slate-700">
+                <h3 className="text-white font-bold mb-4">Registered Gyms</h3>
+                <div className="space-y-2">
+                    {gyms.length === 0 ? (
+                        <p className="text-slate-500 text-sm">No gyms registered yet.</p>
+                    ) : (
+                        gyms.map(g => (
+                            <div key={g.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group hover:bg-slate-700 transition-colors">
+                                <div>
+                                    <span className="text-white font-medium block">{g.name}</span>
+                                    <span className="text-xs text-slate-400 block flex items-center gap-1">
+                                        <MapPin className="w-3 h-3"/> {g.city}, {g.state}
+                                    </span>
+                                </div>
+                                <button 
+                                    onClick={() => handleDeleteGym(g.id)} 
+                                    className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2"
+                                    title="Delete Gym"
+                                >
+                                    <Trash2 className="w-4 h-4"/>
+                                </button>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+  };
 
   const AdminFighterManager = () => {
     const [form, setForm] = useState<Partial<Fighter>>({ sport: 'mma', gender: 'men', weight_class: WEIGHT_CLASSES['mma']['men'][0] });
@@ -2172,6 +2280,9 @@ const App = () => {
                         <button onClick={() => setActiveTab('admin_fighters')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_fighters' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
                             <Users className="w-4 h-4"/> Fighter Manager
                         </button>
+                        <button onClick={() => setActiveTab('admin_gyms')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_gyms' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
+                            <Building2 className="w-4 h-4"/> Gym Manager
+                        </button>
                         <button onClick={() => setActiveTab('admin_belts')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_belts' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
                             <Crown className="w-4 h-4"/> Belt Manager
                         </button>
@@ -2183,6 +2294,7 @@ const App = () => {
                 {activeTab === 'events' && renderEvents()}
                 {activeTab === 'admin_dashboard' && <AdminDashboard />}
                 {activeTab === 'admin_fighters' && <AdminFighterManager />}
+                {activeTab === 'admin_gyms' && <AdminGymManager />}
                 {activeTab === 'admin_events' && <AdminEventManager />}
                 {activeTab === 'admin_belts' && <AdminBeltManager />}
             </>
