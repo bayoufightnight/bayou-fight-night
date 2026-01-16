@@ -368,6 +368,8 @@ const App = () => {
   const [viewingFighterId, setViewingFighterId] = useState<string | null>(null);
   const [viewingGymId, setViewingGymId] = useState<string | null>(null);
   const [viewingPromoId, setViewingPromoId] = useState<string | null>(null);
+  // NEW: Lifted state for Admin Event Edit View to persist across re-renders
+  const [adminViewEventId, setAdminViewEventId] = useState<string | null>(null);
 
   // Data State
   const [fighters, setFighters] = useState<Fighter[]>([]);
@@ -499,7 +501,9 @@ const App = () => {
     };
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), newEvent);
     setEvents([...events, { ...newEvent, id: docRef.id } as Event]);
-    showNotification("Event draft created.");
+    // Automatically navigate to the edit page for this new event
+    setAdminViewEventId(docRef.id);
+    showNotification("Event draft created. You can now add bouts.");
   };
 
   const handleDeleteEvent = (id: string) => {
@@ -507,6 +511,8 @@ const App = () => {
           if(!user) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'events', id));
           setEvents(events.filter(e => e.id !== id));
+          // If we deleted the one we were viewing, go back to list
+          if (adminViewEventId === id) setAdminViewEventId(null);
           showNotification("Event deleted.");
       });
   };
@@ -561,6 +567,8 @@ const App = () => {
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bouts'), newBout);
     setBouts([...bouts, { ...newBout, id: docRef.id } as Bout]);
     showNotification("Bout added to card.");
+    // Note: Because adminViewEventId is now in App state, the re-render triggered here
+    // will NOT reset the view. The user stays on the edit page.
   };
 
   const handleDeleteBout = (id: string) => {
@@ -1487,7 +1495,7 @@ const App = () => {
                        <div className="text-xs text-slate-400">Register new talent</div>
                    </div>
                </button>
-               <button onClick={() => setActiveTab('admin_events')} className="w-full flex items-center gap-3 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors text-left">
+               <button onClick={() => { setActiveTab('admin_events'); setAdminViewEventId(null); }} className="w-full flex items-center gap-3 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors text-left">
                    <Calendar className="w-5 h-5 text-yellow-500"/>
                    <div>
                        <div className="font-bold">Create Event</div>
@@ -1665,17 +1673,18 @@ const App = () => {
 
   const AdminEventManager = () => {
       const [newEvent, setNewEvent] = useState<Partial<Event>>({ state: 'LA' });
-      const [viewingEvent, setViewingEvent] = useState<string | null>(null);
+      // Removed local state: const [viewingEvent, setViewingEvent] = useState<string | null>(null);
+      // Using global state: adminViewEventId
 
-      if (viewingEvent) {
-          const evt = events.find(e => e.id === viewingEvent);
+      if (adminViewEventId) {
+          const evt = events.find(e => e.id === adminViewEventId);
           if (!evt) return null;
           const evtBouts = bouts.filter(b => b.event_id === evt.id).sort((a,b) => a.bout_order - b.bout_order);
 
           return (
               <div className="space-y-6">
                   <div className="flex items-center gap-4 mb-4">
-                      <button onClick={() => setViewingEvent(null)} className="text-slate-400 hover:text-white flex items-center gap-1">
+                      <button onClick={() => setAdminViewEventId(null)} className="text-slate-400 hover:text-white flex items-center gap-1">
                           <ChevronRight className="w-4 h-4 rotate-180"/> Back
                       </button>
                       <h2 className="text-2xl font-bold text-white">{evt.name} Fight Card</h2>
@@ -1765,7 +1774,7 @@ const App = () => {
                   <h3 className="text-white font-bold">Draft Events</h3>
                   {events.filter(e => !e.is_published).map(e => (
                       <div key={e.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors flex justify-between items-center group">
-                          <div onClick={() => setViewingEvent(e.id)} className="flex-1">
+                          <div onClick={() => setAdminViewEventId(e.id)} className="flex-1">
                               <div className="font-bold text-white">{e.name}</div>
                               <div className="text-xs text-slate-400">{e.event_date} • {e.venue}</div>
                           </div>
@@ -1781,7 +1790,7 @@ const App = () => {
                   <h3 className="text-white font-bold pt-6">Published Events</h3>
                   {events.filter(e => e.is_published).map(e => (
                       <div key={e.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors opacity-75">
-                          <div onClick={() => setViewingEvent(e.id)} className="flex justify-between items-center flex-1">
+                          <div onClick={() => setAdminViewEventId(e.id)} className="flex justify-between items-center flex-1">
                             <div>
                                 <div className="font-bold text-white">{e.name}</div>
                                 <div className="text-xs text-slate-400">{e.event_date}</div>
