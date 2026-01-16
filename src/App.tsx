@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -41,7 +41,11 @@ import {
   X,
   AlertTriangle,
   EyeOff,
-  LogOut
+  LogOut,
+  Download,
+  Upload,
+  FileJson,
+  Database
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -412,6 +416,7 @@ const NotificationToast = ({
 
 const App = () => {
   const [user, setUser] = useState<User | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Derived state for Admin Mode (True if user is logged in and NOT anonymous)
   const isAdminMode = user ? !user.isAnonymous : false;
@@ -518,6 +523,84 @@ const App = () => {
 
     fetchData();
   }, [user]);
+
+  // --- Data Management Actions (Import/Export/Clear) ---
+
+  const handleExport = async () => {
+    setLoading(true);
+    try {
+      const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts'];
+      const data: any = {};
+      for (const col of collections) {
+        const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
+        data[col] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bfn_backup_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      showNotification("Database exported successfully.");
+    } catch (err) {
+      console.error(err);
+      showNotification("Export failed", "error");
+    }
+    setLoading(false);
+  };
+
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+    setLoading(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const data = JSON.parse(e.target?.result as string);
+        for (const [colName, docs] of Object.entries(data)) {
+            const docArray = docs as any[];
+            for (let i = 0; i < docArray.length; i += 400) {
+                const chunk = docArray.slice(i, i + 400);
+                const batch = writeBatch(db);
+                chunk.forEach(docData => {
+                    const { id, ...rest } = docData;
+                    const ref = doc(db, 'artifacts', appId, 'public', 'data', colName, id);
+                    batch.set(ref, rest);
+                });
+                await batch.commit();
+            }
+        }
+        showNotification("Database imported. Reloading...");
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (err) {
+         console.error(err);
+         showNotification("Import failed", "error");
+         setLoading(false);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = ''; 
+  };
+
+  const handleClearDatabase = async () => {
+     requestConfirmation("WARNING: This will permanently delete ALL data. Type 'DELETE' in the console if you are really sure... Just kidding, clicking Confirm is enough. Are you sure?", async () => {
+         if (!user) return;
+         setLoading(true);
+         const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts'];
+         for (const col of collections) {
+             const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
+             const docs = snap.docs;
+             for (let i = 0; i < docs.length; i += 400) {
+                 const batch = writeBatch(db);
+                 docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
+                 await batch.commit();
+             }
+         }
+         showNotification("Database cleared. Reloading...");
+         setTimeout(() => window.location.reload(), 1000);
+     });
+  };
 
   // --- Actions ---
 
@@ -1583,6 +1666,30 @@ const App = () => {
                        <div className="text-xs text-red-300">Resets/Adds demo content</div>
                    </div>
                </button>
+
+               <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-700">
+                   <button onClick={handleExport} className="flex flex-col items-center justify-center p-2 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors" title="Export DB">
+                       <Download className="w-4 h-4 mb-1"/>
+                       <span className="text-[10px]">Export</span>
+                   </button>
+                   
+                   <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center p-2 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors relative" title="Import DB">
+                       <Upload className="w-4 h-4 mb-1"/>
+                       <span className="text-[10px]">Import</span>
+                       <input 
+                           type="file" 
+                           ref={fileInputRef} 
+                           onChange={handleImport} 
+                           className="hidden" 
+                           accept=".json"
+                       />
+                   </button>
+
+                   <button onClick={handleClearDatabase} className="flex flex-col items-center justify-center p-2 bg-red-900/30 hover:bg-red-900/50 border border-red-900/50 rounded text-red-400 transition-colors" title="Clear DB">
+                       <Trash2 className="w-4 h-4 mb-1"/>
+                       <span className="text-[10px]">Clear</span>
+                   </button>
+               </div>
            </div>
        </div>
     </div>
@@ -1726,8 +1833,7 @@ const App = () => {
 
   const AdminEventManager = () => {
       const [newEvent, setNewEvent] = useState<Partial<Event>>({ state: 'LA' });
-      // Removed local state: const [viewingEvent, setViewingEvent] = useState<string | null>(null);
-      // Using global state: adminViewEventId
+      const [viewingEvent, setViewingEvent] = useState<string | null>(null);
 
       if (adminViewEventId) {
           const evt = events.find(e => e.id === adminViewEventId);
@@ -1866,19 +1972,16 @@ const App = () => {
           event_id: event.id
       });
 
-      // 1. Get IDs of fighters already booked on this card
-      const bookedFighterIds = new Set(existingBouts.flatMap(b => [b.red_fighter_id, b.blue_fighter_id]));
-
-      // 2. Filter base list: Match criteria AND not already booked
-      const availableFighters = fighters.filter(f => 
-          f.sport === bout.sport && 
-          f.gender === bout.gender &&
-          !bookedFighterIds.has(f.id)
-      );
+      // Filter fighters by selected criteria
+      const availableFighters = fighters.filter(f => f.sport === bout.sport && f.gender === bout.gender);
       
-      // 3. Filter specific dropdowns to prevent self-match
-      const availableRedFighters = availableFighters.filter(f => f.id !== bout.blue_fighter_id);
-      const availableBlueFighters = availableFighters.filter(f => f.id !== bout.red_fighter_id);
+      // Filter out selected fighters so they can't fight themselves and prevent double booking
+      const bookedFighterIds = new Set(existingBouts.flatMap(b => [b.red_fighter_id, b.blue_fighter_id]));
+      
+      const unbookedFighters = availableFighters.filter(f => !bookedFighterIds.has(f.id));
+
+      const availableRedFighters = unbookedFighters.filter(f => f.id !== bout.blue_fighter_id);
+      const availableBlueFighters = unbookedFighters.filter(f => f.id !== bout.red_fighter_id);
       
       // Filter available belts
       const availableBelts = belts.filter(b => b.promotion_id === event.promotion_id && b.sport === bout.sport && b.gender === bout.gender && b.weight_class === bout.weight_class);
