@@ -4,6 +4,8 @@ import {
   getAuth, 
   signInWithCustomToken, 
   signInAnonymously, 
+  signInWithEmailAndPassword,
+  signOut,
   onAuthStateChanged,
   User 
 } from 'firebase/auth';
@@ -38,7 +40,8 @@ import {
   Trash2,
   X,
   AlertTriangle,
-  EyeOff
+  EyeOff,
+  LogOut
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -330,7 +333,61 @@ const ConfirmModal = ({
     );
 };
 
-// Custom Toast Component to replace window.alert
+// Login Modal Component
+const LoginModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        try {
+            await signInWithEmailAndPassword(auth, email, password);
+            onClose();
+            setEmail('');
+            setPassword('');
+            setError('');
+        } catch (err: any) {
+            setError(err.message || 'Login failed');
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100] backdrop-blur-sm p-4">
+            <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 max-w-md w-full shadow-2xl relative">
+                <button onClick={onClose} className="absolute top-4 right-4 text-slate-500 hover:text-white"><X className="w-5 h-5"/></button>
+                <div className="flex items-center gap-3 text-yellow-500 mb-6">
+                    <Lock className="w-6 h-6"/>
+                    <h3 className="text-xl font-bold text-white">Staff Access</h3>
+                </div>
+                {error && <div className="bg-red-900/50 text-red-300 p-3 rounded mb-4 text-sm">{error}</div>}
+                <form onSubmit={handleLogin} className="space-y-4">
+                    <input 
+                        type="email" 
+                        placeholder="Email Address" 
+                        className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white focus:border-yellow-500 outline-none"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                    />
+                    <input 
+                        type="password" 
+                        placeholder="Password" 
+                        className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white focus:border-yellow-500 outline-none"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                    />
+                    <button type="submit" className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded transition-colors">
+                        Sign In
+                    </button>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+// Custom Toast Component
 const NotificationToast = ({ 
     message, 
     type, 
@@ -355,12 +412,16 @@ const NotificationToast = ({
 
 const App = () => {
   const [user, setUser] = useState<User | null>(null);
-  const [isAdminMode, setIsAdminMode] = useState(false);
-  const [activeTab, setActiveTab] = useState('rankings'); // rankings, events, admin_dashboard
+  
+  // Derived state for Admin Mode (True if user is logged in and NOT anonymous)
+  const isAdminMode = user ? !user.isAnonymous : false;
+  
+  const [activeTab, setActiveTab] = useState('rankings'); 
   const [searchQuery, setSearchQuery] = useState('');
   
   // Modal & Notification State
   const [modalConfig, setModalConfig] = useState<{isOpen: boolean, message: string, onConfirm: () => void} | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
   // Navigation State
@@ -368,7 +429,6 @@ const App = () => {
   const [viewingFighterId, setViewingFighterId] = useState<string | null>(null);
   const [viewingGymId, setViewingGymId] = useState<string | null>(null);
   const [viewingPromoId, setViewingPromoId] = useState<string | null>(null);
-  // NEW: Lifted state for Admin Event Edit View to persist across re-renders
   const [adminViewEventId, setAdminViewEventId] = useState<string | null>(null);
 
   // Data State
@@ -402,6 +462,14 @@ const App = () => {
       });
   };
 
+  const handleLogout = async () => {
+      await signOut(auth);
+      await signInAnonymously(auth);
+      setActiveTab('rankings');
+      setAdminViewEventId(null);
+      showNotification("Logged out successfully");
+  };
+
   // --- Auth & Data Fetching ---
 
   useEffect(() => {
@@ -409,7 +477,9 @@ const App = () => {
       if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
         await signInWithCustomToken(auth, __initial_auth_token);
       } else {
-        await signInAnonymously(auth);
+        if (!auth.currentUser) {
+            await signInAnonymously(auth);
+        }
       }
     };
     initAuth();
@@ -420,7 +490,6 @@ const App = () => {
   useEffect(() => {
     if (!user) return;
 
-    // Fetch Public Data
     const fetchData = async () => {
       setLoading(true);
       try {
@@ -434,14 +503,13 @@ const App = () => {
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'belts'))
         ]);
 
-        // Added 'any' type casting to avoid implicit any errors in map functions
-        setFighters(fightersSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Fighter)));
-        setEvents(eventsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Event)).sort((a: any, b: any) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime()));
-        setBouts(boutsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Bout)));
-        setRankings(rankingsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as RankingSnapshot)));
-        setPromotions(promotionsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Promotion)));
-        setGyms(gymsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Gym)));
-        setBelts(beltsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Belt))); 
+        setFighters(fightersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Fighter)));
+        setEvents(eventsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Event)).sort((a,b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime()));
+        setBouts(boutsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Bout)));
+        setRankings(rankingsSnap.docs.map(d => ({ id: d.id, ...d.data() } as RankingSnapshot)));
+        setPromotions(promotionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Promotion)));
+        setGyms(gymsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Gym)));
+        setBelts(beltsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Belt))); 
       } catch (err) {
         console.error("Error fetching data", err);
       }
@@ -454,7 +522,7 @@ const App = () => {
   // --- Actions ---
 
   const handleCreateFighter = async (data: Partial<Fighter>) => {
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
     const name = generateFighterName(data.first_name!, data.last_name!);
     const newFighter: any = {
       first_name: data.first_name!,
@@ -466,8 +534,8 @@ const App = () => {
       weight_class: data.weight_class!,
       hometown: data.hometown || '',
       active_status: 'active',
-      fighter_level: data.fighter_level || 'am', // Default to Amateur per spec
-      is_published: true // Simplified for prototype
+      fighter_level: data.fighter_level || 'am',
+      is_published: true
     };
 
     if (data.gym_id) newFighter.gym_id = data.gym_id;
@@ -480,7 +548,7 @@ const App = () => {
 
   const handleDeleteFighter = (id: string) => {
       requestConfirmation("Are you sure you want to delete this fighter? This action cannot be undone.", async () => {
-          if (!user) return;
+          if (!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', id));
           setFighters(fighters.filter(f => f.id !== id));
           showNotification("Fighter deleted.");
@@ -488,7 +556,7 @@ const App = () => {
   };
 
   const handleCreateEvent = async (data: Partial<Event>) => {
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
     const newEvent: Omit<Event, 'id'> = {
       promotion_id: data.promotion_id!,
       name: data.name!,
@@ -497,28 +565,26 @@ const App = () => {
       venue: data.venue || '',
       city: data.city || '',
       state: data.state || 'LA',
-      is_published: false // Events start unpublished
+      is_published: false
     };
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), newEvent);
     setEvents([...events, { ...newEvent, id: docRef.id } as Event]);
-    // Automatically navigate to the edit page for this new event
     setAdminViewEventId(docRef.id);
     showNotification("Event draft created. You can now add bouts.");
   };
 
   const handleDeleteEvent = (id: string) => {
       requestConfirmation("Delete this event? Bouts linked to it will remain in the database but be hidden.", async () => {
-          if(!user) return;
+          if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'events', id));
           setEvents(events.filter(e => e.id !== id));
-          // If we deleted the one we were viewing, go back to list
           if (adminViewEventId === id) setAdminViewEventId(null);
           showNotification("Event deleted.");
       });
   };
 
   const handleCreateBelt = async (data: Partial<Belt>) => {
-      if(!user) return;
+      if(!user || user.isAnonymous) return;
       const newBelt: Omit<Belt, 'id'> = {
           promotion_id: data.promotion_id!,
           name: data.name!,
@@ -535,7 +601,7 @@ const App = () => {
 
   const handleDeleteBelt = (id: string) => {
       requestConfirmation("Delete this championship belt?", async () => {
-          if(!user) return;
+          if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'belts', id));
           setBelts(belts.filter(b => b.id !== id));
           showNotification("Belt deleted.");
@@ -543,7 +609,7 @@ const App = () => {
   }
 
   const handleAddBout = async (boutData: Partial<Bout>) => {
-    if(!user) return;
+    if(!user || user.isAnonymous) return;
     if (!boutData.red_fighter_id || !boutData.blue_fighter_id) return;
     
     const newBout: any = {
@@ -562,18 +628,16 @@ const App = () => {
     if (boutData.method) newBout.method = boutData.method;
     if (boutData.round) newBout.round = boutData.round;
     if (boutData.time) newBout.time = boutData.time;
-    if (boutData.belt_id) newBout.belt_id = boutData.belt_id; // Store belt ID if selected
+    if (boutData.belt_id) newBout.belt_id = boutData.belt_id;
 
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bouts'), newBout);
     setBouts([...bouts, { ...newBout, id: docRef.id } as Bout]);
     showNotification("Bout added to card.");
-    // Note: Because adminViewEventId is now in App state, the re-render triggered here
-    // will NOT reset the view. The user stays on the edit page.
   };
 
   const handleDeleteBout = (id: string) => {
       requestConfirmation("Remove this bout from the card?", async () => {
-          if(!user) return;
+          if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', id));
           setBouts(bouts.filter(b => b.id !== id));
           showNotification("Bout removed.");
@@ -581,33 +645,24 @@ const App = () => {
   };
 
   const handlePublishEvent = async (event: Event) => {
-    if(!user) return;
+    if(!user || user.isAnonymous) return;
     const batch = writeBatch(db);
 
-    // 1. Publish Event
     batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: true });
     
-    // 2. Publish Bouts & Handle Belt Transfers
     const eventBouts = bouts.filter(b => b.event_id === event.id);
     const updatedBouts = [...bouts];
     const updatedBelts = [...belts];
 
     eventBouts.forEach(b => {
-        // Publish bout
         const boutRef = doc(db, 'artifacts', appId, 'public', 'data', 'bouts', b.id);
         batch.update(boutRef, { is_published: true });
 
-        // AUTOMATION: Belt Update Logic
-        // If it is a title bout, has a belt_id, and has a winner
         if (b.is_title_bout && b.belt_id && b.winner_id) {
-            // Find the belt
             const beltIndex = updatedBelts.findIndex(belt => belt.id === b.belt_id);
             if (beltIndex !== -1) {
-                // Update belt champion in Firestore
                 const beltRef = doc(db, 'artifacts', appId, 'public', 'data', 'belts', b.belt_id);
                 batch.update(beltRef, { current_champion_id: b.winner_id });
-                
-                // Update local state copy
                 updatedBelts[beltIndex] = { ...updatedBelts[beltIndex], current_champion_id: b.winner_id };
             }
         }
@@ -615,22 +670,19 @@ const App = () => {
 
     await batch.commit();
 
-    // Local State updates
     setEvents(events.map(e => e.id === event.id ? { ...e, is_published: true } : e));
     setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: true } : b));
-    setBelts(updatedBelts); // Update belts state to reflect new champions immediately
+    setBelts(updatedBelts); 
     showNotification("Event Published! Rankings and Champions updated.");
   };
 
   const handleUnpublishEvent = (event: Event) => {
       requestConfirmation("Unpublish this event? It will be hidden from the public and excluded from ranking calculations until republished. This allows you to edit the card.", async () => {
-          if(!user) return;
+          if(!user || user.isAnonymous) return;
           const batch = writeBatch(db);
 
-          // 1. Unpublish Event
           batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: false });
 
-          // 2. Unpublish Bouts
           const eventBouts = bouts.filter(b => b.event_id === event.id);
           const updatedBouts = [...bouts];
 
@@ -641,7 +693,6 @@ const App = () => {
 
           await batch.commit();
 
-          // Local State Update
           setEvents(events.map(e => e.id === event.id ? { ...e, is_published: false } : e));
           setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: false } : b));
           showNotification("Event Unpublished. You can now edit the card.");
@@ -650,7 +701,7 @@ const App = () => {
 
   // --- THE RANKING ENGINE ---
   const recomputeRankings = async () => {
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
     setLoading(true);
 
     const previousRankMap = new Map<string, number>();
@@ -709,8 +760,7 @@ const App = () => {
     });
 
     const today = new Date();
-    // Removed unused 'id' parameter from forEach
-    fighterStats.forEach((stats) => {
+    fighterStats.forEach((stats, id) => {
         if (!stats.lastFightDate) return;
         const diffTime = Math.abs(today.getTime() - stats.lastFightDate.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
@@ -772,7 +822,7 @@ const App = () => {
 
   const seedData = async () => {
       requestConfirmation("This will RESET and SEED demo data. Continue?", async () => {
-          if(!user) return;
+          if(!user || user.isAnonymous) return;
           const batch = writeBatch(db);
           const promoId = "promo-1";
           const gymId = "gym-1";
@@ -854,18 +904,21 @@ const App = () => {
     if (viewingFighterId) return renderFighterProfile(viewingFighterId);
     if (viewingGymId) return renderGymProfile(viewingGymId);
 
-    // FIX: Filter by latest date to avoid duplicate entries from history
+    // FIX: Find the latest date in the dataset
     const latestDate = rankings.length > 0 
         ? rankings.reduce((max, r) => (r.as_of_date > max ? r.as_of_date : max), '') 
         : '';
 
-    // Deduplicate logic: use a Set to track seen fighter IDs for the current day
+    // FIX: Set to track seen fighters for deduplication
     const seenFighters = new Set<string>();
 
     const filtered = rankings
+        // Only show rankings from the most recent snapshot
         .filter(r => r.as_of_date === latestDate)
+        // Apply category filters
         .filter(r => r.sport === selectedSport && r.gender === selectedGender && r.weight_class === selectedWeightClass)
         .sort((a,b) => a.rank - b.rank)
+        // Deduplicate: if we've already seen this fighter in this list, skip them
         .filter(r => {
             if (seenFighters.has(r.fighter_id)) return false;
             seenFighters.add(r.fighter_id);
@@ -1909,6 +1962,7 @@ const App = () => {
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-yellow-500/30 relative">
       {/* Global Modal & Notification */}
       {modalConfig && <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.onConfirm} onCancel={() => setModalConfig(null)} />}
+      <LoginModal isOpen={showLogin} onClose={() => setShowLogin(false)} />
       {notification && <NotificationToast message={notification.message} type={notification.type} onClose={() => setNotification(null)} />}
 
       {/* Navigation */}
@@ -1982,11 +2036,11 @@ const App = () => {
 
             <div className="flex items-center gap-4 ml-4">
                {isAdminMode ? (
-                   <button onClick={() => { setIsAdminMode(false); setActiveTab('rankings'); setSearchQuery(''); }} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors">
-                       EXIT ADMIN
+                   <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors flex items-center gap-2">
+                       <LogOut className="w-3 h-3"/> SIGN OUT
                    </button>
                ) : (
-                   <button onClick={() => { setIsAdminMode(true); setActiveTab('admin_dashboard'); setSearchQuery(''); }} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+                   <button onClick={() => setShowLogin(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
                        <Lock className="w-4 h-4"/> <span className="text-xs font-bold hidden md:inline">STAFF</span>
                    </button>
                )}
