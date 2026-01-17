@@ -433,7 +433,7 @@ const NotificationToast = ({
     }, [onClose]);
 
     return (
-        <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-2xl z-[100] flex items-center gap-3 animate-in slide-in-from-bottom-2 fade-in duration-300 ${type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+        <div className={`fixed bottom-20 left-1/2 -translate-x-1/2 md:translate-x-0 md:bottom-4 md:right-4 md:left-auto px-6 py-3 rounded-lg shadow-2xl z-[100] flex items-center gap-3 animate-in slide-in-from-bottom-2 fade-in duration-300 ${type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
             {type === 'success' ? <Check className="w-5 h-5"/> : <AlertTriangle className="w-5 h-5"/>}
             <span className="font-bold">{message}</span>
         </div>
@@ -502,6 +502,30 @@ const App = () => {
       showNotification("Logged out successfully");
   };
 
+  // --- NAVIGATION HELPERS ---
+  const resetToHome = () => {
+      setSearchQuery(''); 
+      setActiveTab('rankings'); 
+      setPublicEventId(null); 
+      setViewingFighterId(null);
+      setViewingGymId(null);
+      setViewingPromoId(null);
+  };
+
+  const resetToRankings = () => {
+      setActiveTab('rankings');
+      setViewingFighterId(null);
+      setViewingGymId(null);
+      setSearchQuery('');
+  };
+
+  const resetToEvents = () => {
+      setActiveTab('events');
+      setPublicEventId(null);
+      setViewingPromoId(null);
+      setSearchQuery('');
+  };
+
   // --- Auth & Data Fetching ---
 
   useEffect(() => {
@@ -551,7 +575,7 @@ const App = () => {
     fetchData();
   }, [user]);
 
-  // --- Data Management Actions (Import/Export/Clear) ---
+  // --- Data Management Actions ---
 
   const handleExport = async () => {
     setLoading(true);
@@ -606,7 +630,6 @@ const App = () => {
       }
     };
     reader.readAsText(file);
-    // Reset input
     if (fileInputRef.current) fileInputRef.current.value = ''; 
   };
 
@@ -1732,6 +1755,7 @@ const App = () => {
                    </div>
                </button>
 
+               {/* Import/Export/Clear Grid */}
                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-700">
                    <button onClick={handleExport} className="flex flex-col items-center justify-center p-2 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors" title="Export DB">
                        <Download className="w-4 h-4 mb-1"/>
@@ -1755,6 +1779,12 @@ const App = () => {
                        <span className="text-[10px]">Clear</span>
                    </button>
                </div>
+
+               {/* Mobile Sign Out (Visible only on small screens inside dashboard) */}
+               <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors mt-4 md:hidden border border-slate-600">
+                   <LogOut className="w-4 h-4"/>
+                   <span className="font-bold">Sign Out</span>
+               </button>
            </div>
        </div>
     </div>
@@ -1821,7 +1851,7 @@ const App = () => {
                                 </div>
                                 <button 
                                     onClick={() => handleDeleteGym(g.id)} 
-                                    className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2"
+                                    className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity p-2"
                                     title="Delete Gym"
                                 >
                                     <Trash2 className="w-4 h-4"/>
@@ -1890,7 +1920,7 @@ const App = () => {
                                 <span className="text-white font-medium">{f.fighter_name}</span>
                                 <span className="text-xs text-slate-400 block">{f.sport.toUpperCase()} • {f.weight_class}</span>
                             </div>
-                            <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                 <Trash2 className="w-4 h-4"/>
                             </button>
                         </div>
@@ -1959,7 +1989,7 @@ const App = () => {
                                 ) : (
                                     <span className="text-xs bg-slate-800 text-slate-400 px-2 py-1 rounded">VACANT</span>
                                 )}
-                                <button onClick={() => handleDeleteBelt(b.id)} className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => handleDeleteBelt(b.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                     <Trash2 className="w-4 h-4"/>
                                 </button>
                             </div>
@@ -2034,7 +2064,7 @@ const App = () => {
                                           {bout.is_title_bout && <span className="text-[10px] flex items-center gap-1 text-yellow-500 mt-1"><Crown className="w-3 h-3"/> Title Fight</span>}
                                       </div>
                                       {!evt.is_published && (
-                                          <button onClick={() => handleDeleteBout(bout.id)} className="text-slate-500 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                          <button onClick={() => handleDeleteBout(bout.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                               <Trash2 className="w-4 h-4"/>
                                           </button>
                                       )}
@@ -2078,7 +2108,7 @@ const App = () => {
                               <div className="text-xs text-slate-400">{e.event_date} • {e.venue}</div>
                           </div>
                           <div className="flex items-center gap-2">
-                              <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                                   <Trash2 className="w-4 h-4"/>
                               </button>
                               <ChevronRight className="text-slate-600"/>
@@ -2096,7 +2126,7 @@ const App = () => {
                             </div>
                             <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded mr-4">Live</span>
                           </div>
-                          <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 p-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                               <Trash2 className="w-4 h-4"/>
                           </button>
                       </div>
@@ -2214,7 +2244,7 @@ const App = () => {
           <div className="flex justify-between h-20">
             <div className="flex items-center gap-6 flex-1">
                {/* Logo & Branding */}
-              <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setSearchQuery(''); setActiveTab('rankings'); setPublicEventId(null); setViewingFighterId(null); }}>
+              <div className="flex items-center gap-3 cursor-pointer" onClick={resetToHome}>
                  <div className="w-12 h-12 bg-black rounded-full border border-slate-700 overflow-hidden flex items-center justify-center">
                     {/* Updated Logo URL */}
                     <img src="https://drive.google.com/uc?export=view&id=1ucjGjhPycGWUhkgNUujXeExL0ZlgBAmO" alt="BFN Logo" className="w-full h-full object-cover" onError={(e) => {
@@ -2233,23 +2263,13 @@ const App = () => {
               {!isAdminMode && (
                 <div className="hidden md:flex gap-1 ml-8">
                   <button 
-                    onClick={() => {
-                        setActiveTab('rankings');
-                        setViewingFighterId(null);
-                        setViewingGymId(null);
-                        setSearchQuery('');
-                    }} 
+                    onClick={resetToRankings} 
                     className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'rankings' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
                   >
                     Rankings
                   </button>
                   <button 
-                    onClick={() => {
-                        setActiveTab('events');
-                        setPublicEventId(null);
-                        setViewingPromoId(null);
-                        setSearchQuery('');
-                    }} 
+                    onClick={resetToEvents} 
                     className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'events' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
                   >
                     Events
@@ -2279,11 +2299,11 @@ const App = () => {
 
             <div className="flex items-center gap-4 ml-4">
                {isAdminMode ? (
-                   <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors flex items-center gap-2">
+                   <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors flex items-center gap-2 hidden md:flex">
                        <LogOut className="w-3 h-3"/> SIGN OUT
                    </button>
                ) : (
-                   <button onClick={() => setShowLogin(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+                   <button onClick={() => setShowLogin(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors hidden md:flex">
                        <Lock className="w-4 h-4"/> <span className="text-xs font-bold hidden md:inline">STAFF</span>
                    </button>
                )}
@@ -2293,7 +2313,7 @@ const App = () => {
       </nav>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-7xl mx-auto px-4 py-8 pb-24 md:pb-8">
         {loading ? (
             <LoadingSpinner />
         ) : searchQuery ? (
@@ -2332,9 +2352,47 @@ const App = () => {
             </>
         )}
       </main>
+
+      {/* MOBILE BOTTOM NAV */}
+      <div className="md:hidden fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 z-50 pb-safe">
+        <div className="flex justify-around items-center h-16">
+            <button 
+                onClick={resetToRankings} 
+                className={`flex flex-col items-center gap-1 ${activeTab === 'rankings' && !searchQuery ? 'text-yellow-500' : 'text-slate-500'}`}
+            >
+                <Trophy className="w-6 h-6" />
+                <span className="text-[10px] font-bold uppercase">Rankings</span>
+            </button>
+            <button 
+                onClick={resetToEvents} 
+                className={`flex flex-col items-center gap-1 ${activeTab === 'events' && !searchQuery ? 'text-yellow-500' : 'text-slate-500'}`}
+            >
+                <Calendar className="w-6 h-6" />
+                <span className="text-[10px] font-bold uppercase">Events</span>
+            </button>
+            
+            {isAdminMode ? (
+                <button 
+                    onClick={() => { setActiveTab('admin_dashboard'); setSearchQuery(''); }} 
+                    className={`flex flex-col items-center gap-1 ${activeTab.startsWith('admin_') ? 'text-yellow-500' : 'text-slate-500'}`}
+                >
+                    <Activity className="w-6 h-6" />
+                    <span className="text-[10px] font-bold uppercase">Dashboard</span>
+                </button>
+            ) : (
+                <button 
+                    onClick={() => setShowLogin(true)} 
+                    className="flex flex-col items-center gap-1 text-slate-500"
+                >
+                    <Lock className="w-6 h-6" />
+                    <span className="text-[10px] font-bold uppercase">Staff</span>
+                </button>
+            )}
+        </div>
+      </div>
       
       {/* Footer Branding */}
-      <footer className="mt-20 border-t border-slate-800 py-12 text-center text-slate-500">
+      <footer className="mt-20 border-t border-slate-800 py-12 text-center text-slate-500 mb-16 md:mb-0">
           <div className="flex justify-center items-center gap-2 mb-4 opacity-50">
              <div className="h-px bg-slate-700 w-12"></div>
              <Shield className="w-4 h-4"/>
