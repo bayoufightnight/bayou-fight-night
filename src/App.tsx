@@ -311,14 +311,21 @@ const ConfirmModal = ({
     isOpen, 
     message, 
     onConfirm, 
-    onCancel 
+    onCancel,
+    requireTyping 
 }: { 
     isOpen: boolean; 
     message: string; 
     onConfirm: () => void; 
-    onCancel: () => void 
+    onCancel: () => void;
+    requireTyping?: string;
 }) => {
+    const [inputValue, setInputValue] = useState('');
+
     if (!isOpen) return null;
+
+    const isConfirmDisabled = requireTyping ? inputValue !== requireTyping : false;
+
     return (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] backdrop-blur-sm p-4">
             <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 max-w-sm w-full shadow-2xl">
@@ -327,9 +334,29 @@ const ConfirmModal = ({
                     <h3 className="text-lg font-bold text-white">Confirm Action</h3>
                 </div>
                 <p className="text-slate-300 mb-6">{message}</p>
+                
+                {requireTyping && (
+                    <div className="mb-6">
+                        <p className="text-xs text-slate-400 mb-2 uppercase font-bold">Type <span className="text-red-400 select-all">{requireTyping}</span> to confirm:</p>
+                        <input 
+                            type="text" 
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white font-mono placeholder:text-slate-600 focus:border-red-500 outline-none"
+                            placeholder={requireTyping}
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                        />
+                    </div>
+                )}
+
                 <div className="flex justify-end gap-3">
                     <button onClick={onCancel} className="px-4 py-2 rounded bg-slate-700 text-white font-medium hover:bg-slate-600 transition-colors">Cancel</button>
-                    <button onClick={onConfirm} className="px-4 py-2 rounded bg-red-600 text-white font-bold hover:bg-red-500 transition-colors">Confirm</button>
+                    <button 
+                        onClick={onConfirm} 
+                        disabled={isConfirmDisabled}
+                        className={`px-4 py-2 rounded font-bold transition-colors ${isConfirmDisabled ? 'bg-slate-600 text-slate-400 cursor-not-allowed' : 'bg-red-600 text-white hover:bg-red-500'}`}
+                    >
+                        Confirm
+                    </button>
                 </div>
             </div>
         </div>
@@ -337,7 +364,7 @@ const ConfirmModal = ({
 };
 
 // Login Modal Component
-const LoginModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+const LoginModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -346,10 +373,10 @@ const LoginModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void 
         e.preventDefault();
         try {
             await signInWithEmailAndPassword(auth, email, password);
-            onClose();
             setEmail('');
             setPassword('');
             setError('');
+            onSuccess(); // Redirect logic handled here
         } catch (err: any) {
             setError(err.message || 'Login failed');
         }
@@ -424,7 +451,7 @@ const App = () => {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Modal & Notification State
-  const [modalConfig, setModalConfig] = useState<{isOpen: boolean, message: string, onConfirm: () => void} | null>(null);
+  const [modalConfig, setModalConfig] = useState<{isOpen: boolean, message: string, onConfirm: () => void, requireTyping?: string} | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
@@ -455,10 +482,11 @@ const App = () => {
       setNotification({ message, type });
   };
 
-  const requestConfirmation = (message: string, action: () => void) => {
+  const requestConfirmation = (message: string, action: () => void, requireTyping?: string) => {
       setModalConfig({
           isOpen: true,
           message,
+          requireTyping,
           onConfirm: () => {
               action();
               setModalConfig(null);
@@ -583,22 +611,26 @@ const App = () => {
   };
 
   const handleClearDatabase = async () => {
-     requestConfirmation("WARNING: This will permanently delete ALL data. Type 'DELETE' in the console if you are really sure... Just kidding, clicking Confirm is enough. Are you sure?", async () => {
-         if (!user) return;
-         setLoading(true);
-         const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts'];
-         for (const col of collections) {
-             const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
-             const docs = snap.docs;
-             for (let i = 0; i < docs.length; i += 400) {
-                 const batch = writeBatch(db);
-                 docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
-                 await batch.commit();
+     requestConfirmation(
+         "WARNING: This will permanently delete ALL data, including historical rankings. This action cannot be undone.", 
+         async () => {
+             if (!user) return;
+             setLoading(true);
+             const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts'];
+             for (const col of collections) {
+                 const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
+                 const docs = snap.docs;
+                 for (let i = 0; i < docs.length; i += 400) {
+                     const batch = writeBatch(db);
+                     docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
+                     await batch.commit();
+                 }
              }
-         }
-         showNotification("Database cleared. Reloading...");
-         setTimeout(() => window.location.reload(), 1000);
-     });
+             showNotification("Database cleared. Reloading...");
+             setTimeout(() => window.location.reload(), 1000);
+         },
+         "CLEAR" // Require user to type this to enable button
+     );
   };
 
   // --- Actions ---
@@ -2172,8 +2204,8 @@ const App = () => {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-yellow-500/30 relative">
       {/* Global Modal & Notification */}
-      {modalConfig && <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.onConfirm} onCancel={() => setModalConfig(null)} />}
-      <LoginModal isOpen={showLogin} onClose={() => setShowLogin(false)} />
+      {modalConfig && <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.onConfirm} onCancel={() => setModalConfig(null)} requireTyping={modalConfig.requireTyping} />}
+      <LoginModal isOpen={showLogin} onClose={() => setShowLogin(false)} onSuccess={() => { setShowLogin(false); setActiveTab('admin_dashboard'); }} />
       {notification && <NotificationToast message={notification.message} type={notification.type} onClose={() => setNotification(null)} />}
 
       {/* Navigation */}

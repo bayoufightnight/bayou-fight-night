@@ -1,7 +1,7 @@
 Bayou Fight Night - Application Specification
 
-Version: 2.1
-Date: 2026-01-16
+Version: 2.2
+Date: 2026-01-17
 Status: Phase 2 Complete (Management & Auth)
 
 1. Executive Summary
@@ -54,6 +54,8 @@ B. Admin & Management (Protected)
 
 Email/Password Login (signInWithEmailAndPassword).
 
+Automatic redirection to Dashboard on login.
+
 Public/Anonymous fallback.
 
 Session persistence and Sign Out.
@@ -65,6 +67,8 @@ Database statistics (entity counts).
 Quick Action shortcuts.
 
 System Tools (Recompute, Seed, Import/Export/Clear).
+
+Security Interlocks: Requires typing "CLEAR" to wipe database.
 
 [x] Fighter Manager
 
@@ -103,6 +107,12 @@ K-Factor adjustments based on experience.
 Method of victory multipliers.
 
 Inactivity decay.
+
+[x] Snapshot Management
+
+Rankings page filters by latest snapshot date to prevent duplication.
+
+Clear Database function removes all historical snapshots.
 
 3. Roadmap (Needs & Future Features)
 
