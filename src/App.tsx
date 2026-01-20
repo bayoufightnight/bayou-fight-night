@@ -16,6 +16,7 @@ import {
   getDocs, 
   addDoc,
   deleteDoc, 
+  updateDoc,
   writeBatch
 } from 'firebase/firestore';
 import { 
@@ -44,7 +45,10 @@ import {
   LogOut,
   Download,
   Upload,
-  Building2
+  Building2,
+  Pencil,
+  Scale,
+  Save
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -128,6 +132,14 @@ interface Belt {
     is_active: boolean;
 }
 
+interface WeightClass {
+    id: string;
+    name: string; // e.g. "Lightweight (155)"
+    sport: Sport;
+    gender: Gender;
+    order: number; // for sorting
+}
+
 interface Bout {
   id: string;
   event_id: string;
@@ -182,7 +194,7 @@ const METHOD_MULTIPLIERS: Record<BoutMethod, number> = {
   'nc': 0
 };
 
-const WEIGHT_CLASSES: Record<Sport, Record<Gender, string[]>> = {
+const DEFAULT_WEIGHT_CLASSES: Record<Sport, Record<Gender, string[]>> = {
   mma: {
     men: ['Flyweight (125)', 'Bantamweight (135)', 'Featherweight (145)', 'Lightweight (155)', 'Welterweight (170)', 'Middleweight (185)', 'Light Heavyweight (205)', 'Heavyweight (265)'],
     women: ['Strawweight (115)', 'Flyweight (125)', 'Bantamweight (135)', 'Featherweight (145)']
@@ -215,12 +227,14 @@ const slugify = (text: string) => {
     .toString()
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, '-')     // Replace spaces with -
+    .replace(/\s+/g, '-')      // Replace spaces with -
     .replace(/[^\w\-]+/g, '') // Remove all non-word chars
     .replace(/\-\-+/g, '-');  // Replace multiple - with single -
 };
 
-const generateFighterName = (first: string, last: string) => `${first.trim()} ${last.trim()}`;
+// UPDATED: Handle potential undefined inputs safely
+const generateFighterName = (first: string = '', last: string = '') => 
+  `${(first || '').trim()} ${(last || '').trim()}`;
 
 const getKFactor = (fightCount: number) => {
   if (fightCount >= 10) return K_FACTORS[10]; // @ts-ignore
@@ -470,12 +484,13 @@ const App = () => {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [gyms, setGyms] = useState<Gym[]>([]);
   const [belts, setBelts] = useState<Belt[]>([]);
+  const [weightClasses, setWeightClasses] = useState<WeightClass[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Filters
   const [selectedSport, setSelectedSport] = useState<Sport>('mma');
   const [selectedGender, setSelectedGender] = useState<Gender>('men');
-  const [selectedWeightClass, setSelectedWeightClass] = useState<string>(WEIGHT_CLASSES['mma']['men'][3]); 
+  const [selectedWeightClass, setSelectedWeightClass] = useState<string>(''); 
 
   // --- Helpers ---
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
@@ -526,16 +541,36 @@ const App = () => {
       setSearchQuery('');
   };
 
+  // Get available weight classes based on sport and gender
+  const getAvailableWeightClasses = (s: Sport, g: Gender): string[] => {
+    return weightClasses
+        .filter(wc => wc.sport === s && wc.gender === g)
+        .sort((a,b) => a.order - b.order)
+        .map(wc => wc.name);
+  };
+
+  // Initialize selectedWeightClass when data loads
+  useEffect(() => {
+    if (weightClasses.length > 0 && !selectedWeightClass) {
+        const defaults = getAvailableWeightClasses(selectedSport, selectedGender);
+        if (defaults.length > 0) setSelectedWeightClass(defaults[0]);
+    }
+  }, [weightClasses, selectedSport, selectedGender]);
+
+
   // --- Auth & Data Fetching ---
 
   useEffect(() => {
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        if (!auth.currentUser) {
-            await signInAnonymously(auth);
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
         }
+      } catch (error) {
+        console.error("Auth failed, falling back to anonymous:", error);
+        await signInAnonymously(auth);
       }
     };
     initAuth();
@@ -549,14 +584,15 @@ const App = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [fightersSnap, eventsSnap, boutsSnap, rankingsSnap, promotionsSnap, gymsSnap, beltsSnap] = await Promise.all([
+        const [fightersSnap, eventsSnap, boutsSnap, rankingsSnap, promotionsSnap, gymsSnap, beltsSnap, weightClassesSnap] = await Promise.all([
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'fighters')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'events')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'bouts')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'rankings_snapshots')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'promotions')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'gyms')),
-            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'belts'))
+            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'belts')),
+            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'weight_classes'))
         ]);
 
         setFighters(fightersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Fighter)));
@@ -566,6 +602,7 @@ const App = () => {
         setPromotions(promotionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Promotion)));
         setGyms(gymsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Gym)));
         setBelts(beltsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Belt))); 
+        setWeightClasses(weightClassesSnap.docs.map(d => ({ id: d.id, ...d.data() } as WeightClass)).sort((a,b) => a.order - b.order));
       } catch (err) {
         console.error("Error fetching data", err);
       }
@@ -580,7 +617,7 @@ const App = () => {
   const handleExport = async () => {
     setLoading(true);
     try {
-      const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts'];
+      const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts', 'weight_classes'];
       const data: any = {};
       for (const col of collections) {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
@@ -635,11 +672,11 @@ const App = () => {
 
   const handleClearDatabase = async () => {
      requestConfirmation(
-         "WARNING: This will permanently delete ALL data, including historical rankings. This action cannot be undone.", 
+         "WARNING: This will permanently delete ALL data. This action cannot be undone.", 
          async () => {
              if (!user) return;
              setLoading(true);
-             const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts'];
+             const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts', 'weight_classes'];
              for (const col of collections) {
                  const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
                  const docs = snap.docs;
@@ -652,7 +689,7 @@ const App = () => {
              showNotification("Database cleared. Reloading...");
              setTimeout(() => window.location.reload(), 1000);
          },
-         "CLEAR" // Require user to type this to enable button
+         "CLEAR"
      );
   };
 
@@ -660,16 +697,20 @@ const App = () => {
 
   const handleCreateFighter = async (data: Partial<Fighter>) => {
     if (!user || user.isAnonymous) return;
-    const name = generateFighterName(data.first_name!, data.last_name!);
+    // UPDATED: Robust defaulting to avoid undefined
+    const first = data.first_name || '';
+    const last = data.last_name || '';
+    const name = generateFighterName(first, last);
+    
     const newFighter: any = {
-      first_name: data.first_name!,
-      last_name: data.last_name!,
+      first_name: first,
+      last_name: last,
       fighter_name: name,
       slug: slugify(name),
       sport: data.sport || 'mma',
       gender: data.gender || 'men',
-      weight_class: data.weight_class!,
-      hometown: data.hometown || '',
+      weight_class: data.weight_class || '', // Prevent undefined
+      hometown: data.hometown || '', // Prevent undefined
       active_status: 'active',
       fighter_level: data.fighter_level || 'am',
       is_published: true
@@ -681,6 +722,34 @@ const App = () => {
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'fighters'), newFighter);
     setFighters([...fighters, { ...newFighter, id: docRef.id } as Fighter]);
     showNotification("Fighter added successfully!");
+  };
+
+  const handleUpdateFighter = async (id: string, data: Partial<Fighter>) => {
+      if (!user || user.isAnonymous) return;
+      
+      const currentFighter = fighters.find(f => f.id === id);
+      const first = data.first_name ?? currentFighter?.first_name ?? '';
+      const last = data.last_name ?? currentFighter?.last_name ?? '';
+      const name = generateFighterName(first, last);
+
+      // UPDATED: Safe update construction
+      const updates: any = {
+          fighter_name: name,
+          slug: slugify(name)
+      };
+
+      if (data.first_name !== undefined) updates.first_name = data.first_name;
+      if (data.last_name !== undefined) updates.last_name = data.last_name;
+      if (data.sport !== undefined) updates.sport = data.sport;
+      if (data.gender !== undefined) updates.gender = data.gender;
+      if (data.weight_class !== undefined) updates.weight_class = data.weight_class || '';
+      if (data.gym_id !== undefined) updates.gym_id = data.gym_id;
+      if (data.hometown !== undefined) updates.hometown = data.hometown || '';
+      if (data.fighter_level !== undefined) updates.fighter_level = data.fighter_level;
+      
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', id), updates);
+      setFighters(fighters.map(f => f.id === id ? { ...f, ...updates } : f));
+      showNotification("Fighter updated successfully!");
   };
 
   const handleDeleteFighter = (id: string) => {
@@ -695,9 +764,10 @@ const App = () => {
   // --- GYM ACTIONS ---
   const handleCreateGym = async (data: Partial<Gym>) => {
       if (!user || user.isAnonymous) return;
+      // UPDATED: Defaults
       const newGym: any = {
-          name: data.name!,
-          slug: slugify(data.name!),
+          name: data.name || '',
+          slug: slugify(data.name || ''),
           city: data.city || '',
           state: data.state || 'LA'
       };
@@ -715,13 +785,38 @@ const App = () => {
       });
   };
 
+  // --- WEIGHT CLASS ACTIONS ---
+  const handleCreateWeightClass = async (data: Partial<WeightClass>) => {
+      if (!user || user.isAnonymous) return;
+      // UPDATED: Defaults
+      const newClass: any = {
+          name: data.name || '',
+          sport: data.sport || 'mma',
+          gender: data.gender || 'men',
+          order: weightClasses.filter(wc => wc.sport === (data.sport || 'mma') && wc.gender === (data.gender || 'men')).length + 1
+      };
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'weight_classes'), newClass);
+      setWeightClasses([...weightClasses, { ...newClass, id: docRef.id }].sort((a,b) => a.order - b.order));
+      showNotification("Weight class added!");
+  };
+
+  const handleDeleteWeightClass = (id: string) => {
+      requestConfirmation("Delete this weight class?", async () => {
+          if(!user || user.isAnonymous) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'weight_classes', id));
+          setWeightClasses(weightClasses.filter(wc => wc.id !== id));
+          showNotification("Weight class deleted.");
+      });
+  };
+
   const handleCreateEvent = async (data: Partial<Event>) => {
     if (!user || user.isAnonymous) return;
+    // UPDATED: Defaults
     const newEvent: Omit<Event, 'id'> = {
       promotion_id: data.promotion_id!,
-      name: data.name!,
-      slug: slugify(data.name!),
-      event_date: data.event_date!,
+      name: data.name || '',
+      slug: slugify(data.name || ''),
+      event_date: data.event_date || new Date().toISOString().split('T')[0],
       venue: data.venue || '',
       city: data.city || '',
       state: data.state || 'LA',
@@ -745,12 +840,13 @@ const App = () => {
 
   const handleCreateBelt = async (data: Partial<Belt>) => {
       if(!user || user.isAnonymous) return;
+      // UPDATED: Defaults and prevention of undefined
       const newBelt: Omit<Belt, 'id'> = {
           promotion_id: data.promotion_id!,
-          name: data.name!,
-          sport: data.sport!,
-          gender: data.gender!,
-          weight_class: data.weight_class!,
+          name: data.name || '',
+          sport: data.sport || 'mma',
+          gender: data.gender || 'men',
+          weight_class: data.weight_class || '',
           current_champion_id: null,
           is_active: true
       };
@@ -772,12 +868,13 @@ const App = () => {
     if(!user || user.isAnonymous) return;
     if (!boutData.red_fighter_id || !boutData.blue_fighter_id) return;
     
+    // UPDATED: Defaults
     const newBout: any = {
         event_id: boutData.event_id!,
         bout_order: bouts.filter(b => b.event_id === boutData.event_id).length + 1,
-        sport: boutData.sport!,
-        gender: boutData.gender!,
-        weight_class: boutData.weight_class!,
+        sport: boutData.sport || 'mma',
+        gender: boutData.gender || 'men',
+        weight_class: boutData.weight_class || '',
         red_fighter_id: boutData.red_fighter_id!,
         blue_fighter_id: boutData.blue_fighter_id!,
         is_title_bout: boutData.is_title_bout || false,
@@ -995,6 +1092,24 @@ const App = () => {
               id: gymId, name: 'Gladiators Academy', slug: 'gladiators-academy', city: 'Lafayette', state: 'LA'
           });
 
+          // Seed Weight Classes
+          let wcCount = 0;
+          Object.entries(DEFAULT_WEIGHT_CLASSES).forEach(([sport, genders]) => {
+              Object.entries(genders).forEach(([gender, classes]) => {
+                  (classes as string[]).forEach((wcName, idx) => {
+                      wcCount++;
+                      const wcRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'weight_classes'));
+                      batch.set(wcRef, {
+                          id: wcRef.id,
+                          name: wcName,
+                          sport: sport as Sport,
+                          gender: gender as Gender,
+                          order: idx + 1
+                      });
+                  });
+              });
+          });
+
           const fightersList = [
             { id: 'f1', first: 'Dustin', last: 'Poirier' },
             { id: 'f2', first: 'Justin', last: 'Gaethje' },
@@ -1005,8 +1120,8 @@ const App = () => {
           fightersList.forEach(f => {
              const name = `${f.first} ${f.last}`;
              batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', f.id), {
-                  id: f.id, first_name: f.first, last_name: f.last, fighter_name: name, slug: slugify(name),
-                  sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)', gym_id: gymId, active_status: 'active', fighter_level: 'pro', is_published: true
+                 id: f.id, first_name: f.first, last_name: f.last, fighter_name: name, slug: slugify(name),
+                 sport: 'mma', gender: 'men', weight_class: 'Lightweight (155)', gym_id: gymId, active_status: 'active', fighter_level: 'pro', is_published: true
              });
           });
 
@@ -1084,6 +1199,9 @@ const App = () => {
             seenFighters.add(r.fighter_id);
             return true;
         });
+    
+    // Dynamic weight classes based on selection
+    const availableWeightClasses = getAvailableWeightClasses(selectedSport, selectedGender);
 
     return (
       <div className="space-y-6">
@@ -1097,8 +1215,11 @@ const App = () => {
               <select 
                 value={selectedSport} 
                 onChange={(e) => {
-                    setSelectedSport(e.target.value as Sport);
-                    setSelectedWeightClass(WEIGHT_CLASSES[e.target.value as Sport][selectedGender][0]);
+                    const newSport = e.target.value as Sport;
+                    setSelectedSport(newSport);
+                    // Reset weight class if possible or pick first available
+                    const newClasses = getAvailableWeightClasses(newSport, selectedGender);
+                    if (newClasses.length > 0) setSelectedWeightClass(newClasses[0]);
                 }}
                 className="bg-slate-700 text-white p-2 rounded border border-slate-600 outline-none focus:border-yellow-500"
               >
@@ -1107,9 +1228,10 @@ const App = () => {
               <select 
                 value={selectedGender} 
                 onChange={(e) => {
-                    const g = e.target.value as Gender;
-                    setSelectedGender(g);
-                    setSelectedWeightClass(WEIGHT_CLASSES[selectedSport][g][0]);
+                    const newGender = e.target.value as Gender;
+                    setSelectedGender(newGender);
+                    const newClasses = getAvailableWeightClasses(selectedSport, newGender);
+                    if (newClasses.length > 0) setSelectedWeightClass(newClasses[0]);
                 }}
                 className="bg-slate-700 text-white p-2 rounded border border-slate-600 outline-none focus:border-yellow-500"
               >
@@ -1121,7 +1243,7 @@ const App = () => {
                 onChange={(e) => setSelectedWeightClass(e.target.value)}
                 className="bg-slate-700 text-white p-2 rounded border border-slate-600 outline-none focus:border-yellow-500"
               >
-                {WEIGHT_CLASSES[selectedSport][selectedGender].map(w => <option key={w} value={w}>{w}</option>)}
+                {availableWeightClasses.map(w => <option key={w} value={w}>{w}</option>)}
               </select>
             </div>
           </div>
@@ -1140,11 +1262,8 @@ const App = () => {
                 {filtered.length > 0 ? filtered.map((row) => {
                   const fighter = fighters.find(f => f.id === row.fighter_id);
                   const gym = gyms.find(g => g.id === fighter?.gym_id);
-                  
-                  // Check for Belt Ownership
                   const heldBelt = belts.find(b => b.current_champion_id === fighter?.id && b.sport === selectedSport && b.weight_class === selectedWeightClass);
 
-                  // Phase 2: Movement Logic
                   let moveIcon = <Minus className="w-4 h-4 text-slate-500" />;
                   let moveText = "";
                   
@@ -1234,7 +1353,7 @@ const App = () => {
               {/* Profile Header */}
               <div className="bg-slate-800 rounded-xl p-8 border border-slate-700 flex flex-col md:flex-row gap-8 items-center md:items-start relative overflow-hidden">
                   <div className="w-32 h-32 md:w-48 md:h-48 bg-slate-700 rounded-full flex-shrink-0 border-4 border-slate-600 overflow-hidden shadow-2xl z-10">
-                       {f.photo_url ? <img src={f.photo_url} className="w-full h-full object-cover" /> : <Users className="w-full h-full p-8 text-slate-500"/>}
+                        {f.photo_url ? <img src={f.photo_url} className="w-full h-full object-cover" /> : <Users className="w-full h-full p-8 text-slate-500"/>}
                   </div>
                   
                   {/* Background Accents for Champions */}
@@ -1281,13 +1400,13 @@ const App = () => {
                               <div className="text-2xl font-bold text-white">{record.wins}-{record.losses}-{record.draws}</div>
                               <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Record</div>
                           </div>
-                           <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
+                            <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
                               <div className="text-2xl font-bold text-yellow-500">
                                   {rankings.find(r => r.fighter_id === fId)?.score.toFixed(0) || 'N/A'}
                               </div>
                               <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Rating</div>
                           </div>
-                           <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
+                            <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
                               <div className="text-2xl font-bold text-white">#{rankings.find(r => r.fighter_id === fId)?.rank || '-'}</div>
                               <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Rank</div>
                           </div>
@@ -1504,7 +1623,7 @@ const App = () => {
                 
                 {/* Event Header */}
                 <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative">
-                     <div className="h-48 bg-slate-700 relative">
+                      <div className="h-48 bg-slate-700 relative">
                         <img src={`https://placehold.co/1200x400/1e293b/fbbf24?text=${evt.name.toUpperCase()}`} className="w-full h-full object-cover opacity-50" alt="Banner"/>
                         <div className="absolute bottom-0 left-0 p-6 bg-gradient-to-t from-slate-900 via-slate-900/80 to-transparent w-full">
                             <div onClick={() => setViewingPromoId(evt.promotion_id)} className="text-yellow-500 font-bold uppercase tracking-widest text-sm mb-1 cursor-pointer hover:underline">{promotions.find(p => p.id === evt.promotion_id)?.name}</div>
@@ -1514,7 +1633,7 @@ const App = () => {
                                 <span className="flex items-center gap-2"><Dumbbell className="w-4 h-4"/> {evt.venue}, {evt.city}</span>
                             </div>
                         </div>
-                     </div>
+                      </div>
                 </div>
 
                 {/* Bouts List */}
@@ -1755,7 +1874,6 @@ const App = () => {
                    </div>
                </button>
 
-               {/* Import/Export/Clear Grid */}
                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-700">
                    <button onClick={handleExport} className="flex flex-col items-center justify-center p-2 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors" title="Export DB">
                        <Download className="w-4 h-4 mb-1"/>
@@ -1866,12 +1984,44 @@ const App = () => {
   };
 
   const AdminFighterManager = () => {
-    const [form, setForm] = useState<Partial<Fighter>>({ sport: 'mma', gender: 'men', weight_class: WEIGHT_CLASSES['mma']['men'][0] });
+    // Initial state matching default
+    const [form, setForm] = useState<Partial<Fighter>>({ sport: 'mma', gender: 'men', weight_class: '' });
+    const [editingId, setEditingId] = useState<string | null>(null);
+
+    // Update weight class when sport/gender changes if not editing
+    useEffect(() => {
+        if (!editingId && !form.weight_class) {
+             const classes = getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men');
+             if (classes.length > 0) setForm(f => ({ ...f, weight_class: classes[0] }));
+        }
+    }, [form.sport, form.gender, weightClasses, editingId]);
+
+    const handleEditClick = (fighter: Fighter) => {
+        setForm(fighter);
+        setEditingId(fighter.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCancelEdit = () => {
+        setForm({ sport: 'mma', gender: 'men' });
+        setEditingId(null);
+    };
+
+    const handleSubmit = () => {
+        if (editingId) {
+            handleUpdateFighter(editingId, form);
+        } else {
+            handleCreateFighter(form);
+        }
+        setForm({ sport: 'mma', gender: 'men' });
+        setEditingId(null);
+    };
+
     return (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-white">Fighter Registry</h2>
-                <button onClick={() => setForm({})} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
+                <h2 className="text-xl font-bold text-white">{editingId ? 'Edit Fighter' : 'Fighter Registry'}</h2>
+                <button onClick={handleCancelEdit} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="space-y-4">
@@ -1886,20 +2036,20 @@ const App = () => {
                      <div className="grid grid-cols-2 gap-4">
                         <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.sport} onChange={e => {
                             const s = e.target.value as Sport;
-                            setForm({...form, sport: s, weight_class: WEIGHT_CLASSES[s][form.gender || 'men'][0]});
+                            setForm({...form, sport: s});
                         }}>
                              {Object.entries(SPORTS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                         </select>
                         <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gender} onChange={e => {
                             const g = e.target.value as Gender;
-                            setForm({...form, gender: g, weight_class: WEIGHT_CLASSES[form.sport || 'mma'][g][0]});
+                            setForm({...form, gender: g});
                         }}>
                             <option value="men">Men</option>
                             <option value="women">Women</option>
                         </select>
                      </div>
                      <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.weight_class} onChange={e => setForm({...form, weight_class: e.target.value})}>
-                        {WEIGHT_CLASSES[form.sport || 'mma'][form.gender || 'men'].map(w => <option key={w} value={w}>{w}</option>)}
+                        {getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men').map(w => <option key={w} value={w}>{w}</option>)}
                      </select>
                      <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.fighter_level || 'am'} onChange={e => setForm({...form, fighter_level: e.target.value as FighterLevel})}>
                         <option value="am">Amateur (Start 1450)</option>
@@ -1907,22 +2057,35 @@ const App = () => {
                      </select>
                 </div>
             </div>
-            <button onClick={() => { handleCreateFighter(form); setForm({ sport: 'mma', gender: 'men' }); }} className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2">
-                <Plus className="w-4 h-4"/> Register Fighter
-            </button>
+            <div className="flex gap-2">
+                <button onClick={handleSubmit} className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2">
+                    {editingId ? <Save className="w-4 h-4"/> : <Plus className="w-4 h-4"/>}
+                    {editingId ? 'Update Fighter' : 'Register Fighter'}
+                </button>
+                {editingId && (
+                    <button onClick={handleCancelEdit} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-6 rounded">
+                        Cancel
+                    </button>
+                )}
+            </div>
 
             <div className="mt-8 pt-8 border-t border-slate-700">
                 <h3 className="text-white font-bold mb-4">Recent Registrations</h3>
                 <div className="space-y-2">
-                    {fighters.slice(-5).reverse().map(f => (
+                    {fighters.slice().reverse().slice(0, 10).map(f => (
                         <div key={f.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group">
                             <div>
                                 <span className="text-white font-medium">{f.fighter_name}</span>
                                 <span className="text-xs text-slate-400 block">{f.sport.toUpperCase()} • {f.weight_class}</span>
                             </div>
-                            <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                <Trash2 className="w-4 h-4"/>
-                            </button>
+                            <div className="flex gap-2">
+                                <button onClick={() => handleEditClick(f)} className="text-slate-500 hover:text-yellow-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                    <Pencil className="w-4 h-4"/>
+                                </button>
+                                <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                                    <Trash2 className="w-4 h-4"/>
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -1932,7 +2095,16 @@ const App = () => {
   };
 
   const AdminBeltManager = () => {
-    const [form, setForm] = useState<Partial<Belt>>({ sport: 'mma', gender: 'men', weight_class: WEIGHT_CLASSES['mma']['men'][0] });
+    const [form, setForm] = useState<Partial<Belt>>({ sport: 'mma', gender: 'men' });
+    
+    // UPDATED: Pre-select weight class to avoid undefined submissions
+    useEffect(() => {
+        if (!form.weight_class) {
+             const classes = getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men');
+             if (classes.length > 0) setForm(f => ({ ...f, weight_class: classes[0] }));
+        }
+    }, [form.sport, form.gender, weightClasses]);
+
     return (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
              <div className="flex justify-between items-center mb-6">
@@ -1950,27 +2122,26 @@ const App = () => {
                      <div className="grid grid-cols-2 gap-4">
                         <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.sport} onChange={e => {
                             const s = e.target.value as Sport;
-                            setForm({...form, sport: s, weight_class: WEIGHT_CLASSES[s][form.gender || 'men'][0]});
+                            setForm({...form, sport: s});
                         }}>
                              {Object.entries(SPORTS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                         </select>
                         <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gender} onChange={e => {
                             const g = e.target.value as Gender;
-                            setForm({...form, gender: g, weight_class: WEIGHT_CLASSES[form.sport || 'mma'][g][0]});
+                            setForm({...form, gender: g});
                         }}>
                             <option value="men">Men</option>
                             <option value="women">Women</option>
                         </select>
                      </div>
                      <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.weight_class} onChange={e => setForm({...form, weight_class: e.target.value})}>
-                        {WEIGHT_CLASSES[form.sport || 'mma'][form.gender || 'men'].map(w => <option key={w} value={w}>{w}</option>)}
+                        {getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men').map(w => <option key={w} value={w}>{w}</option>)}
                      </select>
                 </div>
             </div>
             <button onClick={() => { handleCreateBelt(form); setForm({ sport: 'mma', gender: 'men' }); }} className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2">
                 <Plus className="w-4 h-4"/> Create Belt
             </button>
-
             <div className="mt-8 pt-8 border-t border-slate-700">
                 <h3 className="text-white font-bold mb-4">Active Titles</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1995,6 +2166,76 @@ const App = () => {
                             </div>
                         </div>
                     ))}
+                </div>
+            </div>
+        </div>
+    );
+  };
+
+  const AdminWeightManager = () => {
+    const [form, setForm] = useState<Partial<WeightClass>>({ sport: 'mma', gender: 'men' });
+
+    return (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-white">Weight Class Registry</h2>
+                <button onClick={() => setForm({ sport: 'mma', gender: 'men' })} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="space-y-4">
+                    <input 
+                        className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" 
+                        placeholder="Class Name (e.g. Catchweight 165)" 
+                        value={form.name || ''} 
+                        onChange={e => setForm({...form, name: e.target.value})} 
+                    />
+                </div>
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.sport} onChange={e => setForm({...form, sport: e.target.value as Sport})}>
+                             {Object.entries(SPORTS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gender} onChange={e => setForm({...form, gender: e.target.value as Gender})}>
+                            <option value="men">Men</option>
+                            <option value="women">Women</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <button 
+                onClick={() => { handleCreateWeightClass(form); setForm({ sport: 'mma', gender: 'men' }); }} 
+                className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2"
+                disabled={!form.name}
+            >
+                <Plus className="w-4 h-4"/> Add Weight Class
+            </button>
+
+            <div className="mt-8 pt-8 border-t border-slate-700">
+                <h3 className="text-white font-bold mb-4">Weight Classes</h3>
+                <div className="space-y-2">
+                    {weightClasses.filter(wc => wc.sport === form.sport && wc.gender === form.gender).length === 0 ? (
+                        <p className="text-slate-500 text-sm">No weight classes found for filter.</p>
+                    ) : (
+                        weightClasses.filter(wc => wc.sport === form.sport && wc.gender === form.gender).map(wc => (
+                            <div key={wc.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group hover:bg-slate-700 transition-colors">
+                                <div>
+                                    <span className="text-white font-medium block">{wc.name}</span>
+                                    <span className="text-xs text-slate-400 block flex items-center gap-1">
+                                        {SPORTS_LABELS[wc.sport]} • {wc.gender === 'men' ? "Men's" : "Women's"}
+                                    </span>
+                                </div>
+                                <button 
+                                    onClick={() => handleDeleteWeightClass(wc.id)} 
+                                    className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity p-2"
+                                    title="Delete Class"
+                                >
+                                    <Trash2 className="w-4 h-4"/>
+                                </button>
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
         </div>
@@ -2138,9 +2379,18 @@ const App = () => {
 
   const BoutEntryForm = ({ event, onAdd, fighters, existingBouts }: { event: Event, onAdd: (b: Partial<Bout>) => void, fighters: Fighter[], existingBouts: Bout[] }) => {
       const [bout, setBout] = useState<Partial<Bout>>({ 
-          sport: 'mma', gender: 'men', weight_class: WEIGHT_CLASSES['mma']['men'][0],
+          sport: 'mma', gender: 'men', weight_class: '' ,
           event_id: event.id
       });
+      
+      // Update weight class defaults
+       useEffect(() => {
+        if (!bout.weight_class) {
+             const classes = getAvailableWeightClasses(bout.sport || 'mma', bout.gender || 'men');
+             if (classes.length > 0) setBout(b => ({ ...b, weight_class: classes[0] }));
+        }
+       }, [bout.sport, bout.gender, weightClasses]);
+
 
       // Filter fighters by selected criteria
       const availableFighters = fighters.filter(f => f.sport === bout.sport && f.gender === bout.gender);
@@ -2167,7 +2417,7 @@ const App = () => {
                        <option value="women">Women</option>
                    </select>
                    <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={bout.weight_class} onChange={e => setBout({...bout, weight_class: e.target.value})}>
-                        {WEIGHT_CLASSES[bout.sport || 'mma'][bout.gender || 'men'].map(w => <option key={w} value={w}>{w}</option>)}
+                        {getAvailableWeightClasses(bout.sport || 'mma', bout.gender || 'men').map(w => <option key={w} value={w}>{w}</option>)}
                    </select>
               </div>
 
@@ -2335,6 +2585,9 @@ const App = () => {
                         <button onClick={() => setActiveTab('admin_gyms')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_gyms' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
                             <Building2 className="w-4 h-4"/> Gym Manager
                         </button>
+                        <button onClick={() => setActiveTab('admin_weight_classes')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_weight_classes' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
+                            <Scale className="w-4 h-4"/> Weight Classes
+                        </button>
                         <button onClick={() => setActiveTab('admin_belts')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_belts' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
                             <Crown className="w-4 h-4"/> Belt Manager
                         </button>
@@ -2347,6 +2600,7 @@ const App = () => {
                 {activeTab === 'admin_dashboard' && <AdminDashboard />}
                 {activeTab === 'admin_fighters' && <AdminFighterManager />}
                 {activeTab === 'admin_gyms' && <AdminGymManager />}
+                {activeTab === 'admin_weight_classes' && <AdminWeightManager />}
                 {activeTab === 'admin_events' && <AdminEventManager />}
                 {activeTab === 'admin_belts' && <AdminBeltManager />}
             </>
