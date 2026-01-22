@@ -48,7 +48,13 @@ import {
   Building2,
   Pencil,
   Scale,
-  Save
+  Save,
+  Globe,
+  Facebook,
+  Twitter,
+  Instagram,
+  Youtube,
+  Link as LinkIcon
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -106,7 +112,20 @@ interface Promotion {
   id: string;
   name: string;
   slug: string;
-  region: string;
+  acronym: string;
+  hq_city: string;
+  hq_state: string;
+  region: string; // e.g., "Regional (LA)", "National", "Global"
+  aka: string[]; // Aliases / Also Known As
+  logo_url?: string;
+  website?: string;
+  socials: {
+    facebook?: string;
+    instagram?: string;
+    twitter?: string;
+    tapology?: string;
+    youtube?: string;
+  };
 }
 
 interface Event {
@@ -697,7 +716,6 @@ const App = () => {
 
   const handleCreateFighter = async (data: Partial<Fighter>) => {
     if (!user || user.isAnonymous) return;
-    // UPDATED: Robust defaulting to avoid undefined
     const first = data.first_name || '';
     const last = data.last_name || '';
     const name = generateFighterName(first, last);
@@ -709,8 +727,8 @@ const App = () => {
       slug: slugify(name),
       sport: data.sport || 'mma',
       gender: data.gender || 'men',
-      weight_class: data.weight_class || '', // Prevent undefined
-      hometown: data.hometown || '', // Prevent undefined
+      weight_class: data.weight_class || '',
+      hometown: data.hometown || '',
       active_status: 'active',
       fighter_level: data.fighter_level || 'am',
       is_published: true
@@ -732,7 +750,6 @@ const App = () => {
       const last = data.last_name ?? currentFighter?.last_name ?? '';
       const name = generateFighterName(first, last);
 
-      // UPDATED: Safe update construction
       const updates: any = {
           fighter_name: name,
           slug: slugify(name)
@@ -761,10 +778,55 @@ const App = () => {
       });
   };
 
+  // --- PROMOTION ACTIONS ---
+  const handleCreatePromotion = async (data: Partial<Promotion>) => {
+      if(!user || user.isAnonymous) return;
+      const newPromo: any = {
+          name: data.name || '',
+          slug: slugify(data.name || ''),
+          acronym: data.acronym || '',
+          region: data.region || 'Regional',
+          hq_city: data.hq_city || '',
+          hq_state: data.hq_state || '',
+          aka: data.aka || [],
+          logo_url: data.logo_url || '',
+          website: data.website || '',
+          socials: data.socials || {}
+      };
+      
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'promotions'), newPromo);
+      setPromotions([...promotions, { ...newPromo, id: docRef.id } as Promotion]);
+      showNotification("Promotion registered successfully!");
+  };
+
+  const handleUpdatePromotion = async (id: string, data: Partial<Promotion>) => {
+      if(!user || user.isAnonymous) return;
+      const updates: any = { ...data };
+      if (data.name) updates.slug = slugify(data.name);
+      
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', id), updates);
+      setPromotions(promotions.map(p => p.id === id ? { ...p, ...updates } : p));
+      showNotification("Promotion updated!");
+  };
+
+  const handleDeletePromotion = (id: string) => {
+      const hasEvents = events.some(e => e.promotion_id === id);
+      if (hasEvents) {
+          showNotification("Cannot delete: This promotion has linked events.", "error");
+          return;
+      }
+      
+      requestConfirmation("Delete this promotion?", async () => {
+          if(!user || user.isAnonymous) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', id));
+          setPromotions(promotions.filter(p => p.id !== id));
+          showNotification("Promotion deleted.");
+      });
+  };
+
   // --- GYM ACTIONS ---
   const handleCreateGym = async (data: Partial<Gym>) => {
       if (!user || user.isAnonymous) return;
-      // UPDATED: Defaults
       const newGym: any = {
           name: data.name || '',
           slug: slugify(data.name || ''),
@@ -788,7 +850,6 @@ const App = () => {
   // --- WEIGHT CLASS ACTIONS ---
   const handleCreateWeightClass = async (data: Partial<WeightClass>) => {
       if (!user || user.isAnonymous) return;
-      // UPDATED: Defaults
       const newClass: any = {
           name: data.name || '',
           sport: data.sport || 'mma',
@@ -811,21 +872,37 @@ const App = () => {
 
   const handleCreateEvent = async (data: Partial<Event>) => {
     if (!user || user.isAnonymous) return;
-    // UPDATED: Defaults
+    
+    // VALIDATION: Ensure promotion is selected
+    if (!data.promotion_id) {
+        showNotification("Please select a Promotion first.", "error");
+        return;
+    }
+    if (!data.name) {
+        showNotification("Please enter an Event Name.", "error");
+        return;
+    }
+
     const newEvent: Omit<Event, 'id'> = {
-      promotion_id: data.promotion_id!,
-      name: data.name || '',
-      slug: slugify(data.name || ''),
+      promotion_id: data.promotion_id,
+      name: data.name,
+      slug: slugify(data.name),
       event_date: data.event_date || new Date().toISOString().split('T')[0],
       venue: data.venue || '',
       city: data.city || '',
       state: data.state || 'LA',
       is_published: false
     };
-    const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), newEvent);
-    setEvents([...events, { ...newEvent, id: docRef.id } as Event]);
-    setAdminViewEventId(docRef.id);
-    showNotification("Event draft created. You can now add bouts.");
+    
+    try {
+        const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), newEvent);
+        setEvents([...events, { ...newEvent, id: docRef.id } as Event]);
+        setAdminViewEventId(docRef.id);
+        showNotification("Event draft created. You can now add bouts.");
+    } catch (error: any) {
+        console.error("Error creating event:", error);
+        showNotification(`Error creating event: ${error.message}`, "error");
+    }
   };
 
   const handleDeleteEvent = (id: string) => {
@@ -840,7 +917,6 @@ const App = () => {
 
   const handleCreateBelt = async (data: Partial<Belt>) => {
       if(!user || user.isAnonymous) return;
-      // UPDATED: Defaults and prevention of undefined
       const newBelt: Omit<Belt, 'id'> = {
           promotion_id: data.promotion_id!,
           name: data.name || '',
@@ -868,7 +944,6 @@ const App = () => {
     if(!user || user.isAnonymous) return;
     if (!boutData.red_fighter_id || !boutData.blue_fighter_id) return;
     
-    // UPDATED: Defaults
     const newBout: any = {
         event_id: boutData.event_id!,
         bout_order: bouts.filter(b => b.event_id === boutData.event_id).length + 1,
@@ -1086,7 +1161,17 @@ const App = () => {
           const beltId = "belt-lightweight";
           
           batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', promoId), {
-              id: promoId, name: 'Bayou Fight Night', slug: 'bayou-fight-night', region: 'Louisiana'
+              id: promoId, 
+              name: 'Bayou Fight Night', 
+              slug: 'bayou-fight-night', 
+              acronym: 'BFN',
+              region: 'Regional (LA)',
+              hq_city: 'Lafayette',
+              hq_state: 'LA',
+              aka: [],
+              logo_url: '',
+              website: 'https://bayoufightnight.com',
+              socials: { facebook: '', instagram: '' }
           });
           batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'gyms', gymId), {
               id: gymId, name: 'Gladiators Academy', slug: 'gladiators-academy', city: 'Lafayette', state: 'LA'
@@ -1552,16 +1637,28 @@ const App = () => {
                   <div className="h-40 bg-gradient-to-r from-slate-900 to-slate-800 flex items-center px-8 relative overflow-hidden">
                       <div className="absolute right-0 top-0 h-full w-1/2 bg-yellow-500/5 skew-x-12"></div>
                       <div>
-                          <div className="text-yellow-500 text-sm font-bold uppercase tracking-widest mb-1">{promo.region}</div>
+                          <div className="text-yellow-500 text-sm font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
+                              {promo.region} 
+                              {promo.acronym && <span className="bg-slate-700 px-1 rounded text-white">{promo.acronym}</span>}
+                          </div>
                           <h1 className="text-4xl font-black text-white italic">{promo.name}</h1>
                           <div className="flex items-center gap-4 mt-4 text-slate-400">
+                              <span className="flex items-center gap-2"><MapPin className="w-4 h-4"/> {promo.hq_city}, {promo.hq_state}</span>
                               <span className="flex items-center gap-2"><Calendar className="w-4 h-4"/> {promoEvents.length} Events</span>
-                              <span className="flex items-center gap-2"><Crown className="w-4 h-4"/> {promoBelts.length} Champions</span>
                           </div>
                       </div>
                   </div>
 
                   <div className="p-6">
+                      {/* Social Links Bar */}
+                      <div className="flex gap-4 mb-8 pb-6 border-b border-slate-700">
+                          {promo.website && <a href={promo.website} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-white flex items-center gap-1"><Globe className="w-4 h-4"/> Website</a>}
+                          {promo.socials.facebook && <a href={promo.socials.facebook} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-blue-500"><Facebook className="w-5 h-5"/></a>}
+                          {promo.socials.twitter && <a href={promo.socials.twitter} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-sky-400"><Twitter className="w-5 h-5"/></a>}
+                          {promo.socials.instagram && <a href={promo.socials.instagram} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-pink-500"><Instagram className="w-5 h-5"/></a>}
+                          {promo.socials.youtube && <a href={promo.socials.youtube} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-red-500"><Youtube className="w-5 h-5"/></a>}
+                      </div>
+
                       {/* Hall of Champions */}
                       {promoBelts.length > 0 && (
                           <div className="mb-8">
@@ -1838,11 +1935,11 @@ const App = () => {
                        <div className="text-xs text-slate-400">Schedule a new fight card</div>
                    </div>
                </button>
-               <button onClick={() => setActiveTab('admin_belts')} className="w-full flex items-center gap-3 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors text-left">
-                   <Crown className="w-5 h-5 text-yellow-500"/>
+               <button onClick={() => setActiveTab('admin_promotions')} className="w-full flex items-center gap-3 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors text-left">
+                   <Globe className="w-5 h-5 text-yellow-500"/>
                    <div>
-                       <div className="font-bold">Belt Manager</div>
-                       <div className="text-xs text-slate-400">Create & Assign Titles</div>
+                       <div className="font-bold">Promotion Manager</div>
+                       <div className="text-xs text-slate-400">Manage orgs & data</div>
                    </div>
                </button>
                <button onClick={() => setActiveTab('admin_gyms')} className="w-full flex items-center gap-3 p-3 bg-slate-700 hover:bg-slate-600 rounded text-white transition-colors text-left">
@@ -1907,6 +2004,119 @@ const App = () => {
        </div>
     </div>
   );
+
+  const AdminPromotionManager = () => {
+    const [form, setForm] = useState<Partial<Promotion>>({ region: 'Regional (LA)', socials: {} });
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [akaInput, setAkaInput] = useState('');
+
+    const handleEditClick = (promo: Promotion) => {
+        setForm(promo);
+        setEditingId(promo.id);
+        setAkaInput(promo.aka.join(', '));
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCancelEdit = () => {
+        setForm({ region: 'Regional (LA)', socials: {} });
+        setEditingId(null);
+        setAkaInput('');
+    };
+
+    const handleSubmit = () => {
+        // Process AKA input into array
+        const processedAka = akaInput.split(',').map(s => s.trim()).filter(s => s !== '');
+        const payload = { ...form, aka: processedAka };
+
+        if (editingId) {
+            handleUpdatePromotion(editingId, payload);
+        } else {
+            handleCreatePromotion(payload);
+        }
+        handleCancelEdit();
+    };
+
+    return (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-white">{editingId ? 'Edit Promotion' : 'Promotion Registry'}</h2>
+                <button onClick={handleCancelEdit} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                {/* Basic Info */}
+                <div className="space-y-4">
+                    <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-1">Basic Info</h3>
+                    <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Promotion Name (e.g. Bayou Fight Night)" value={form.name || ''} onChange={e => setForm({...form, name: e.target.value})} />
+                    <div className="grid grid-cols-2 gap-4">
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Acronym (e.g. BFN)" value={form.acronym || ''} onChange={e => setForm({...form, acronym: e.target.value})} />
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.region} onChange={e => setForm({...form, region: e.target.value})}>
+                            <option value="Regional (LA)">Regional (LA)</option>
+                            <option value="Regional (Gulf South)">Regional (Gulf South)</option>
+                            <option value="National">National</option>
+                            <option value="International">International</option>
+                        </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="HQ City" value={form.hq_city || ''} onChange={e => setForm({...form, hq_city: e.target.value})} />
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="HQ State" value={form.hq_state || ''} onChange={e => setForm({...form, hq_state: e.target.value})} />
+                    </div>
+                    <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Also Known As (comma separated)" value={akaInput} onChange={e => setAkaInput(e.target.value)} />
+                </div>
+
+                {/* Media & Links */}
+                <div className="space-y-4">
+                    <h3 className="text-sm font-bold text-slate-400 uppercase border-b border-slate-700 pb-1">Media & Links</h3>
+                    <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Website URL" value={form.website || ''} onChange={e => setForm({...form, website: e.target.value})} />
+                    <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Logo Image URL" value={form.logo_url || ''} onChange={e => setForm({...form, logo_url: e.target.value})} />
+                    <div className="grid grid-cols-2 gap-4">
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Facebook URL" value={form.socials?.facebook || ''} onChange={e => setForm({...form, socials: {...form.socials, facebook: e.target.value}})} />
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Instagram URL" value={form.socials?.instagram || ''} onChange={e => setForm({...form, socials: {...form.socials, instagram: e.target.value}})} />
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Twitter URL" value={form.socials?.twitter || ''} onChange={e => setForm({...form, socials: {...form.socials, twitter: e.target.value}})} />
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Tapology URL" value={form.socials?.tapology || ''} onChange={e => setForm({...form, socials: {...form.socials, tapology: e.target.value}})} />
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex gap-2">
+                <button onClick={handleSubmit} className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2" disabled={!form.name}>
+                    {editingId ? <Save className="w-4 h-4"/> : <Plus className="w-4 h-4"/>}
+                    {editingId ? 'Update Promotion' : 'Register Promotion'}
+                </button>
+                {editingId && (
+                    <button onClick={handleCancelEdit} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-6 rounded">
+                        Cancel
+                    </button>
+                )}
+            </div>
+
+            <div className="mt-8 pt-8 border-t border-slate-700">
+                <h3 className="text-white font-bold mb-4">Registered Promotions</h3>
+                <div className="space-y-2">
+                    {promotions.map(p => (
+                        <div key={p.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group hover:bg-slate-700 transition-colors">
+                            <div>
+                                <span className="text-white font-medium flex items-center gap-2">
+                                    {p.name}
+                                    {p.acronym && <span className="text-xs bg-slate-600 px-1 rounded text-slate-300">{p.acronym}</span>}
+                                </span>
+                                <span className="text-xs text-slate-400 block">{p.region} • {p.hq_city}, {p.hq_state}</span>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => handleEditClick(p)} className="text-slate-500 hover:text-yellow-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity p-2">
+                                    <Pencil className="w-4 h-4"/>
+                                </button>
+                                <button onClick={() => handleDeletePromotion(p.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity p-2">
+                                    <Trash2 className="w-4 h-4"/>
+                                </button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+  };
 
   const AdminGymManager = () => {
     const [form, setForm] = useState<Partial<Gym>>({ state: 'LA' });
@@ -2246,6 +2456,9 @@ const App = () => {
       const [newEvent, setNewEvent] = useState<Partial<Event>>({ state: 'LA' });
       const [viewingEvent, setViewingEvent] = useState<string | null>(null);
 
+      // Derived state for button validation
+      const isValid = newEvent.promotion_id && newEvent.name;
+
       if (adminViewEventId) {
           const evt = events.find(e => e.id === adminViewEventId);
           if (!evt) return null;
@@ -2335,7 +2548,13 @@ const App = () => {
                             <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="City" value={newEvent.city || ''} onChange={e => setNewEvent({...newEvent, city: e.target.value})} />
                             <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="State" value={newEvent.state || ''} onChange={e => setNewEvent({...newEvent, state: e.target.value})} />
                         </div>
-                        <button onClick={() => handleCreateEvent(newEvent)} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 rounded">Create Event Draft</button>
+                        <button 
+                            onClick={() => handleCreateEvent(newEvent)} 
+                            disabled={!isValid}
+                            className={`w-full font-bold py-2 rounded transition-colors ${isValid ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+                        >
+                            Create Event Draft
+                        </button>
                     </div>
                 </div>
               </div>
@@ -2582,6 +2801,9 @@ const App = () => {
                         <button onClick={() => setActiveTab('admin_fighters')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_fighters' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
                             <Users className="w-4 h-4"/> Fighter Manager
                         </button>
+                        <button onClick={() => setActiveTab('admin_promotions')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_promotions' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
+                            <Globe className="w-4 h-4"/> Promotion Manager
+                        </button>
                         <button onClick={() => setActiveTab('admin_gyms')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_gyms' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
                             <Building2 className="w-4 h-4"/> Gym Manager
                         </button>
@@ -2599,6 +2821,7 @@ const App = () => {
                 {activeTab === 'events' && renderEvents()}
                 {activeTab === 'admin_dashboard' && <AdminDashboard />}
                 {activeTab === 'admin_fighters' && <AdminFighterManager />}
+                {activeTab === 'admin_promotions' && <AdminPromotionManager />}
                 {activeTab === 'admin_gyms' && <AdminGymManager />}
                 {activeTab === 'admin_weight_classes' && <AdminWeightManager />}
                 {activeTab === 'admin_events' && <AdminEventManager />}

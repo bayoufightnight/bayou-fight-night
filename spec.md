@@ -1,8 +1,8 @@
 # **Bayou Fight Night - Application Specification**
 
-Version: 2.4
-Date: 2026-01-19
-Status: Phase 2 Refined (Auth Stability & Data Flexibility)
+Version: 2.5.1
+Date: 2026-01-21
+Status: Phase 2 Refined (Bug Fixes)
 
 ## **1. Executive Summary**
 
@@ -29,7 +29,7 @@ Status: Phase 2 Refined (Auth Stability & Data Flexibility)
 * [x] **Profiles**
   * **Fighter:** Record, History, Gym, Stats.
   * **Gym:** Roster, Win %, Location.
-  * **Promotion:** History, Champions.
+  * **Promotion:** Enhanced profile view including social links, headquarters location, and event history.
 * [x] **Global Search**
   * Navigation bar search for Fighters, Events, and Gyms.
 * [x] **Mobile Optimization**
@@ -40,7 +40,7 @@ Status: Phase 2 Refined (Auth Stability & Data Flexibility)
 
 * [x] **Authentication (Enhanced)**
   * Email/Password Login (signInWithEmailAndPassword).
-  * **Stability:** Added fallback to Anonymous Auth if Custom Token fails (prevents initialization crashes).
+  * **Stability:** Added fallback to Anonymous Auth if Custom Token fails.
   * Session persistence and Sign Out.
 * [x] **Dashboard**
   * Database statistics (entity counts).
@@ -49,21 +49,25 @@ Status: Phase 2 Refined (Auth Stability & Data Flexibility)
   * **Security Interlocks:** Requires typing "CLEAR" to wipe database.
 * [x] **Fighter Manager**
   * Create/Register Fighters.
-  * **Edit Fighters:** Ability to update existing fighter details (Name, Gym, Weight, etc.).
+  * **Edit Fighters:** Ability to update existing fighter details.
   * Delete Fighters (with confirmation).
-* [x] **Event Manager**
+* [x] **Event Manager (Fixed)**
   * Create Event Drafts.
+  * **Stability:** Added validation to prevent creating events without a Promotion ID (fixed undefined error).
   * **Bout Maker:** Conflict detection (prevents double-booking).
   * **Publishing Flow:** Draft -> Published (Live) -> Unpublished (Edit).
 * [x] **Gym Manager**
   * Register Gyms (Name, City, State).
   * Delete Gyms.
+* [x] **Promotion Manager**
+  * Full CRUD for Fight Organizations.
+  * Tracks: Name, Acronym, HQ City/State, Region, AKA (Aliases), Website, Logo URL.
+  * Social Media Link Management.
 * [x] **Belt Manager**
   * Create Titles.
   * Auto-update champions based on bout results.
-* [x] **Weight Class Manager (New)**
+* [x] **Weight Class Manager**
   * Dynamic creation of weight classes per Sport/Gender.
-  * Replaces hardcoded constants for greater flexibility.
 
 ### **C. The Ranking Engine**
 
@@ -78,23 +82,17 @@ Status: Phase 2 Refined (Auth Stability & Data Flexibility)
 
 ## **3. Roadmap (Needs & Future Features)**
 
-### **Priority 1: Data Completeness**
+### **Priority 1: Details & Analytics**
 
-* [ ] **Promotion Manager:** UI to add new organizations (e.g., "UFC", "Fury FC") to support historical accuracy.
 * [ ] **Result Details:** Add "Time", "Round", and "Referee" fields to bout results.
+* [ ] **The Matchmaker ("The War Room"):** Predictive analytics tool to simulate matchups and view projected rating changes.
 
-### **Priority 2: Phase 3 - The Matchmaker ("The War Room")**
-
-* [ ] **Predictive Analytics:** Tool for promoters to simulate matchups.
-* [ ] **Stakes Calculator:** Projected rating changes shown *before* booking.
-* [ ] **Fairness Meter:** Visual mismatch flagging.
-
-### **Priority 3: Media & Assets**
+### **Priority 2: Media & Assets**
 
 * [ ] **Firebase Storage:** Upload actual image files instead of text URLs.
 * [ ] **Image Processing:** Auto-crop/resize for avatars.
 
-### **Priority 4: Engagement & Scale**
+### **Priority 3: Engagement & Scale**
 
 * [ ] **News Feed:** Blog/Announcement system.
 * [ ] **Countdown Timer:** Home page widget for next event.
