@@ -22,6 +22,9 @@ Status: Phase 2 Complete. Planning Phase 3 (Deep Data Expansion).
   * **Gym:** Roster, Win %, Location.
   * **Promotion:** Social links, HQ location, event history.
 * [x] **Global Search:** Navigation bar search for Fighters, Events, and Gyms.
+* [x] **Mobile Optimization**
+  * Fixed bottom navigation bar for key actions (Rankings, Events, Dashboard).
+  * Responsive padding and layout adjustments for touch interfaces.
 
 ### **B. Admin & Management (Protected)**
 * [x] **Authentication:** Email/Password + Anonymous fallback.
@@ -36,6 +39,7 @@ Status: Phase 2 Complete. Planning Phase 3 (Deep Data Expansion).
 ### **C. The Ranking Engine**
 * [x] **Elo Algorithm:** Custom K-Factors, Method multipliers, Inactivity decay.
 * [x] **Snapshot Management:** Historical tracking of ranks.
+* [x] **Clear Database:** Function removes all historical snapshots.
 
 ---
 
