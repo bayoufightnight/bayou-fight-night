@@ -1,6 +1,6 @@
 # **Bayou Fight Night - Application Specification**
 
-Version: 3.0
+Version: 3.0.1
 Date: 2026-01-22
 Status: Phase 3 Complete (Deep Data Expansion).
 
@@ -25,6 +25,7 @@ Status: Phase 3 Complete (Deep Data Expansion).
 * [x] **Mobile Optimization**
   * Fixed bottom navigation bar for key actions (Rankings, Events, Dashboard).
   * Responsive padding and layout adjustments for touch interfaces.
+  * **[New]** iOS Input Optimization: Standardized input font size to 16px to prevent auto-zooming.
 
 ### **B. Admin & Management (Protected)**
 * [x] **Authentication:** Email/Password + Anonymous fallback.

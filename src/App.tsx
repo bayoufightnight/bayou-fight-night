@@ -404,7 +404,7 @@ const ConfirmModal = ({
                         <p className="text-xs text-slate-400 mb-2 uppercase font-bold">Type <span className="text-red-400 select-all">{requireTyping}</span> to confirm:</p>
                         <input 
                             type="text" 
-                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white font-mono placeholder:text-slate-600 focus:border-red-500 outline-none"
+                            className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-base text-white font-mono placeholder:text-slate-600 focus:border-red-500 outline-none"
                             placeholder={requireTyping}
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
@@ -460,14 +460,14 @@ const LoginModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
                     <input 
                         type="email" 
                         placeholder="Email Address" 
-                        className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white focus:border-yellow-500 outline-none"
+                        className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-base text-white focus:border-yellow-500 outline-none"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                     />
                     <input 
                         type="password" 
                         placeholder="Password" 
-                        className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-white focus:border-yellow-500 outline-none"
+                        className="w-full bg-slate-700 border border-slate-600 rounded p-3 text-base text-white focus:border-yellow-500 outline-none"
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                     />
@@ -1340,7 +1340,7 @@ const App = () => {
                     const newClasses = getAvailableWeightClasses(newSport, selectedGender);
                     if (newClasses.length > 0) setSelectedWeightClass(newClasses[0]);
                 }}
-                className="bg-slate-700 text-white p-2 rounded border border-slate-600 outline-none focus:border-yellow-500"
+                className="bg-slate-700 text-white text-base rounded border border-slate-600 outline-none focus:border-yellow-500 p-2"
               >
                 {Object.entries(SPORTS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
               </select>
@@ -1352,7 +1352,7 @@ const App = () => {
                     const newClasses = getAvailableWeightClasses(selectedSport, newGender);
                     if (newClasses.length > 0) setSelectedWeightClass(newClasses[0]);
                 }}
-                className="bg-slate-700 text-white p-2 rounded border border-slate-600 outline-none focus:border-yellow-500"
+                className="bg-slate-700 text-white text-base rounded border border-slate-600 outline-none focus:border-yellow-500 p-2"
               >
                 <option value="men">Men's</option>
                 <option value="women">Women's</option>
@@ -1360,7 +1360,7 @@ const App = () => {
               <select 
                 value={selectedWeightClass} 
                 onChange={(e) => setSelectedWeightClass(e.target.value)}
-                className="bg-slate-700 text-white p-2 rounded border border-slate-600 outline-none focus:border-yellow-500"
+                className="bg-slate-700 text-white text-base rounded border border-slate-600 outline-none focus:border-yellow-500 p-2"
               >
                 {availableWeightClasses.map(w => <option key={w} value={w}>{w}</option>)}
               </select>
@@ -2809,7 +2809,7 @@ const App = () => {
 
               <div className="flex-1 max-w-md ml-4 relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-slate-500" /></div>
-                  <input type="text" className="bg-slate-800 border border-slate-700 text-white text-sm rounded-full block w-full pl-10 p-2.5 focus:border-yellow-500 outline-none transition-colors" placeholder="Search fighters, events, gyms..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
+                  <input type="text" className="bg-slate-800 border border-slate-700 text-white text-base rounded-full block w-full pl-10 p-2.5 focus:border-yellow-500 outline-none transition-colors" placeholder="Search fighters, events, gyms..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
                   {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-white"><X className="h-4 w-4"/></button>}
               </div>
             </div>
