@@ -1,8 +1,8 @@
 # **Bayou Fight Night - Application Specification**
 
-Version: 2.5.1 (Planning Update)
+Version: 3.0
 Date: 2026-01-22
-Status: Phase 2 Complete. Planning Phase 3 (Deep Data Expansion).
+Status: Phase 3 Complete (Deep Data Expansion).
 
 ## **1. Executive Summary**
 
@@ -18,7 +18,7 @@ Status: Phase 2 Complete. Planning Phase 3 (Deep Data Expansion).
 * [x] **Rankings Board:** Dynamic Elo-based ranking table with Sport/Gender/Weight filtering.
 * [x] **Event Center:** List of published events with detailed fight cards.
 * [x] **Profiles:**
-  * **Fighter:** Basic Record, Gym, Stats.
+  * **Fighter:** Includes "Tale of the Tape" (Height, Reach, Stance, Age), Nickname, Bio, Fighting Style, and Nationality.
   * **Gym:** Roster, Win %, Location.
   * **Promotion:** Social links, HQ location, event history.
 * [x] **Global Search:** Navigation bar search for Fighters, Events, and Gyms.
@@ -29,12 +29,14 @@ Status: Phase 2 Complete. Planning Phase 3 (Deep Data Expansion).
 ### **B. Admin & Management (Protected)**
 * [x] **Authentication:** Email/Password + Anonymous fallback.
 * [x] **Dashboard:** Stats, Tools (Recompute/Seed/Clear), Security Interlocks.
-* [x] **Fighter Manager:** Create/Edit/Delete.
+* [x] **Fighter Manager:** Full "Tale of the Tape" data entry (DOB, Height, Reach, etc.).
 * [x] **Event Manager:** Create drafts, Validate inputs, Publish/Unpublish.
 * [x] **Gym Manager:** Basic CRUD.
 * [x] **Promotion Manager:** Full CRUD with Socials/HQ data.
 * [x] **Belt Manager:** Title management.
 * [x] **Weight Class Manager:** Dynamic class creation.
+* [x] **Fighting Style Manager:** CRUD for standardized fighting styles (e.g. "Muay Thai").
+* [x] **Referee Manager:** CRUD for tracking officials.
 
 ### **C. The Ranking Engine**
 * [x] **Elo Algorithm:** Custom K-Factors, Method multipliers, Inactivity decay.
@@ -43,39 +45,25 @@ Status: Phase 2 Complete. Planning Phase 3 (Deep Data Expansion).
 
 ---
 
-## **3. Database Schema Reference (Current & Planned)**
-
-This section outlines the data structure required to match industry standards (Sherdog/Tapology).
-**[New]** denotes fields/collections to be added in the next sprints.
+## **3. Database Schema Reference (Version 3.0)**
 
 ### **Collection: `fighters`**
 * `id` (string)
 * `fighter_name` (string)
 * `first_name` (string), `last_name` (string)
-* **[New]** `nickname` (string) - e.g., "The Diamond"
-* **[New]** `birth_date` (string/ISO) - To calc age
-* **[New]** `height` (string/number) - e.g., "5'9" or inches
-* **[New]** `reach` (string/number) - inches
-* **[New]** `stance` (enum: orthodox, southpaw, switch)
-* **[New]** `nationality` (string/code)
-* **[New]** `fighting_style_id` (ref) - Reference to `fighting_styles` collection
-* **[New]** `bio` (text) - Short background/achievements
+* **[Added]** `nickname` (string)
+* **[Added]** `dob` (string/ISO) - To calc age
+* **[Added]** `height` (string) - e.g. "5'9"
+* **[Added]** `reach` (string) - e.g. "72"
+* **[Added]** `stance` (string) - orthodox, southpaw, switch
+* **[Added]** `nationality` (string)
+* **[Added]** `fighting_style_id` (ref)
+* **[Added]** `bio` (text)
 * `sport`, `gender`, `weight_class` (string)
 * `gym_id` (ref)
 * `hometown` (string)
 * `active_status` (active/inactive)
 * `photo_url` (string)
-* **[New]** `record_split` (object): `{ pro: {w,l,d,nc}, amateur: {w,l,d,nc} }`
-
-### **Collection: `events`**
-* `id` (string)
-* `name`, `slug` (string)
-* `promotion_id` (ref)
-* `event_date` (ISO date)
-* `venue`, `city`, `state` (string)
-* `is_published` (boolean)
-* **[New]** `poster_url` (string) - Official Event Flyer
-* **[New]** `broadcast_info` (string) - e.g., "UFC Fight Pass"
 
 ### **Collection: `bouts`**
 * `id` (string)
@@ -83,52 +71,27 @@ This section outlines the data structure required to match industry standards (S
 * `red_fighter_id`, `blue_fighter_id` (ref)
 * `winner_id` (ref)
 * `method` (enum: ko_tko, sub, etc.)
-* **[New]** `method_detail` (string) - e.g., "Rear Naked Choke", "Flying Knee"
-* `round`, `time` (number/string) - **[Update]** Ensure time is tracked (e.g., "2:14")
-* **[New]** `referee_id` (ref) - Reference to `referees` collection
-* **[New]** `scorecards` (string/array) - e.g., "29-28, 29-28, 30-27"
+* **[Added]** `method_detail` (string) - e.g., "Rear Naked Choke"
+* **[Added]** `round` (number)
+* **[Added]** `time` (string) - e.g., "2:14"
+* **[Added]** `referee_id` (ref)
+* **[Added]** `scorecards` (string)
 * `is_title_bout` (boolean), `belt_id` (ref)
 
-### **Collection: `gyms`**
-* `id` (string)
-* `name`, `slug`, `city`, `state` (string)
-* **[New]** `head_coach` (string)
-* **[New]** `logo_url` (string)
-* **[New]** `socials` (object: fb, insta, web)
-
-### **Collection: `promotions`**
-* `id` (string)
-* `name`, `acronym`, `region` (string)
-* `hq_city`, `hq_state` (string)
-* `socials` (object: fb, insta, x, tapology, **[New]** youtube)
-* `website`, `logo_url` (string)
-
-### **[New] Collection: `fighting_styles`**
-* `id` (string)
-* `name` (string) - e.g., "Muay Thai", "Wrestler", "BJJ Specialist"
-* `description` (string)
-
-### **[New] Collection: `referees`**
+### **Collection: `fighting_styles`**
 * `id` (string)
 * `name` (string)
-* `total_bouts_managed` (number) - auto-calc
+* `description` (string)
 
-### **Collection: `rankings_snapshots`**
-* Standard fields (rank, fighter_id, score, etc.)
-* **[New]** `analyst_notes` (string) - "Why they are ranked here"
+### **Collection: `referees`**
+* `id` (string)
+* `name` (string)
 
 ---
 
 ## **4. Roadmap (Revised)**
 
-### **Phase 3: Deep Data (Immediate Priority)**
-* **Fighter "Tale of the Tape":** Implement expanded fighter schema (Height, Reach, Stance, Nickname, Bio).
-* **Fighting Styles Manager:** CRUD for fighting styles; link to fighters.
-* **Referees Manager:** CRUD for referees.
-* **Bout Detail Expansion:** Add Time, Specific Method, Referee, and Scorecards to Bout Entry form.
-* **Record Separation:** Logic to calculate and display Amateur vs Pro records independently.
-
-### **Phase 4: Visuals & Gyms**
+### **Phase 4: Visuals & Gyms (Next Priority)**
 * **Gym Enhancements:** Add Head Coach, Logo, and Socials to Gym Manager and Profiles.
 * **Event Posters:** Add field for event flyer images.
 * **Firebase Storage:** Replace text URLs with actual file uploads.

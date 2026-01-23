@@ -54,7 +54,10 @@ import {
   Twitter,
   Instagram,
   Youtube,
-  Link as LinkIcon
+  Clock,
+  UserCheck,
+  Ruler,
+  Flag
 } from 'lucide-react';
 
 // --- Global Declarations for Environment Variables ---
@@ -82,12 +85,14 @@ type Sport = 'mma' | 'kickboxing' | 'grappling' | 'bare_knuckle_boxing';
 type Gender = 'men' | 'women';
 type FighterLevel = 'pro' | 'am';
 type BoutMethod = 'ko_tko' | 'submission' | 'ud' | 'md_td' | 'sd' | 'dq_doctor' | 'draw' | 'nc';
+type Stance = 'orthodox' | 'southpaw' | 'switch';
 
 interface Fighter {
   id: string;
   first_name: string;
   last_name: string;
   fighter_name: string; // generated
+  nickname?: string;
   slug: string;
   sport: Sport;
   gender: Gender;
@@ -98,6 +103,14 @@ interface Fighter {
   fighter_level: FighterLevel;
   photo_url?: string;
   is_published: boolean;
+  // Phase 3 Data
+  dob?: string; // ISO Date YYYY-MM-DD
+  height?: string; // e.g. "5'9""
+  reach?: string; // e.g. "72.0"
+  stance?: Stance;
+  nationality?: string; // e.g. "USA", "BRA"
+  fighting_style_id?: string;
+  bio?: string;
 }
 
 interface Gym {
@@ -115,8 +128,8 @@ interface Promotion {
   acronym: string;
   hq_city: string;
   hq_state: string;
-  region: string; // e.g., "Regional (LA)", "National", "Global"
-  aka: string[]; // Aliases / Also Known As
+  region: string; 
+  aka: string[]; 
   logo_url?: string;
   website?: string;
   socials: {
@@ -133,7 +146,7 @@ interface Event {
   promotion_id: string;
   name: string;
   slug: string;
-  event_date: string; // ISO date string
+  event_date: string; 
   venue: string;
   city: string;
   state: string;
@@ -143,7 +156,7 @@ interface Event {
 interface Belt {
     id: string;
     promotion_id: string;
-    name: string; // e.g. "World Lightweight Championship"
+    name: string; 
     sport: Sport;
     gender: Gender;
     weight_class: string;
@@ -153,10 +166,10 @@ interface Belt {
 
 interface WeightClass {
     id: string;
-    name: string; // e.g. "Lightweight (155)"
+    name: string;
     sport: Sport;
     gender: Gender;
-    order: number; // for sorting
+    order: number;
 }
 
 interface Bout {
@@ -168,13 +181,18 @@ interface Bout {
   weight_class: string;
   red_fighter_id: string;
   blue_fighter_id: string;
-  winner_id?: string | null; // null if draw/nc
+  winner_id?: string | null;
   method?: BoutMethod;
+  // Phase 3 Details
+  method_detail?: string; // e.g. "Rear Naked Choke"
   round?: number;
-  time?: string;
+  time?: string; // e.g. "2:14"
+  referee_id?: string;
+  scorecards?: string; // e.g. "29-28, 29-28, 30-27"
+  
   is_title_bout: boolean;
-  belt_id?: string | null; // Reference to belt if title bout
-  is_published: boolean; // inherited from event
+  belt_id?: string | null; 
+  is_published: boolean; 
 }
 
 interface RankingSnapshot {
@@ -187,6 +205,18 @@ interface RankingSnapshot {
   fighter_id: string;
   score: number;
   previous_rank?: number;
+}
+
+interface FightingStyle {
+    id: string;
+    name: string; // e.g. "Muay Thai"
+    description?: string;
+}
+
+interface Referee {
+    id: string;
+    name: string;
+    total_bouts?: number; // derived/optional
 }
 
 // --- Constants ---
@@ -209,7 +239,7 @@ const METHOD_MULTIPLIERS: Record<BoutMethod, number> = {
   'md_td': 1.03,
   'sd': 1.00,
   'dq_doctor': 1.00,
-  'draw': 1.00, // Should be handled by draw logic, but keeping for safety
+  'draw': 1.00, 
   'nc': 0
 };
 
@@ -246,12 +276,11 @@ const slugify = (text: string) => {
     .toString()
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, '-')      // Replace spaces with -
-    .replace(/[^\w\-]+/g, '') // Remove all non-word chars
-    .replace(/\-\-+/g, '-');  // Replace multiple - with single -
+    .replace(/\s+/g, '-')      
+    .replace(/[^\w\-]+/g, '') 
+    .replace(/\-\-+/g, '-'); 
 };
 
-// UPDATED: Handle potential undefined inputs safely
 const generateFighterName = (first: string = '', last: string = '') => 
   `${(first || '').trim()} ${(last || '').trim()}`;
 
@@ -265,7 +294,7 @@ const getKFactor = (fightCount: number) => {
 const calculateNewRatings = (
   ratingA: number, 
   ratingB: number, 
-  actualScoreA: number, // 1 for win, 0.5 for draw, 0 for loss
+  actualScoreA: number, 
   kFactorA: number,
   kFactorB: number,
   methodMultiplier: number,
@@ -277,11 +306,9 @@ const calculateNewRatings = (
   let changeA = kFactorA * (actualScoreA - expectedA) * methodMultiplier;
   let changeB = kFactorB * ((1 - actualScoreA) - expectedB) * methodMultiplier;
 
-  // Title bout bonus (Spec: +5 for winner)
   if (isTitleBout && actualScoreA === 1) changeA += 5;
   if (isTitleBout && actualScoreA === 0) changeB += 5;
 
-  // Opponent quality bonuses (Spec)
   if (actualScoreA === 1) {
     if (ratingB >= 1700) changeA += 8;
     else if (ratingB >= 1650) changeA += 6;
@@ -308,19 +335,16 @@ const calculateFighterRecord = (fighterId: string, allBouts: Bout[]) => {
     if (!b.is_published) return;
     if (b.red_fighter_id !== fighterId && b.blue_fighter_id !== fighterId) return;
     
-    // Check for NC
     if (b.method === 'nc') {
       nc++;
       return;
     }
     
-    // Check for Draw
     if (b.winner_id === 'draw' || (!b.winner_id && b.method === 'draw')) {
       draws++;
       return;
     }
 
-    // Win/Loss
     if (b.winner_id === fighterId) {
       wins++;
     } else if (b.winner_id) {
@@ -331,6 +355,14 @@ const calculateFighterRecord = (fighterId: string, allBouts: Bout[]) => {
   return { wins, losses, draws, nc };
 };
 
+const calculateAge = (dobString?: string) => {
+    if (!dobString) return 'N/A';
+    const dob = new Date(dobString);
+    const diff_ms = Date.now() - dob.getTime();
+    const age_dt = new Date(diff_ms);
+    return Math.abs(age_dt.getUTCFullYear() - 1970);
+};
+
 // --- Components ---
 
 const LoadingSpinner = () => (
@@ -339,7 +371,6 @@ const LoadingSpinner = () => (
   </div>
 );
 
-// Custom Modal Component to replace window.confirm
 const ConfirmModal = ({ 
     isOpen, 
     message, 
@@ -396,7 +427,6 @@ const ConfirmModal = ({
     );
 };
 
-// Login Modal Component
 const LoginModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: () => void, onSuccess: () => void }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -409,7 +439,7 @@ const LoginModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
             setEmail('');
             setPassword('');
             setError('');
-            onSuccess(); // Redirect logic handled here
+            onSuccess(); 
         } catch (err: any) {
             setError(err.message || 'Login failed');
         }
@@ -450,7 +480,6 @@ const LoginModal = ({ isOpen, onClose, onSuccess }: { isOpen: boolean, onClose: 
     );
 };
 
-// Custom Toast Component
 const NotificationToast = ({ 
     message, 
     type, 
@@ -476,26 +505,21 @@ const NotificationToast = ({
 const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Derived state for Admin Mode (True if user is logged in and NOT anonymous)
   const isAdminMode = user ? !user.isAnonymous : false;
   
   const [activeTab, setActiveTab] = useState('rankings'); 
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Modal & Notification State
   const [modalConfig, setModalConfig] = useState<{isOpen: boolean, message: string, onConfirm: () => void, requireTyping?: string} | null>(null);
   const [showLogin, setShowLogin] = useState(false);
   const [notification, setNotification] = useState<{message: string, type: 'success' | 'error'} | null>(null);
 
-  // Navigation State
   const [publicEventId, setPublicEventId] = useState<string | null>(null); 
   const [viewingFighterId, setViewingFighterId] = useState<string | null>(null);
   const [viewingGymId, setViewingGymId] = useState<string | null>(null);
   const [viewingPromoId, setViewingPromoId] = useState<string | null>(null);
   const [adminViewEventId, setAdminViewEventId] = useState<string | null>(null);
 
-  // Data State
   const [fighters, setFighters] = useState<Fighter[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [bouts, setBouts] = useState<Bout[]>([]);
@@ -504,9 +528,11 @@ const App = () => {
   const [gyms, setGyms] = useState<Gym[]>([]);
   const [belts, setBelts] = useState<Belt[]>([]);
   const [weightClasses, setWeightClasses] = useState<WeightClass[]>([]);
+  const [fightingStyles, setFightingStyles] = useState<FightingStyle[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  
   const [loading, setLoading] = useState(true);
 
-  // Filters
   const [selectedSport, setSelectedSport] = useState<Sport>('mma');
   const [selectedGender, setSelectedGender] = useState<Gender>('men');
   const [selectedWeightClass, setSelectedWeightClass] = useState<string>(''); 
@@ -536,7 +562,6 @@ const App = () => {
       showNotification("Logged out successfully");
   };
 
-  // --- NAVIGATION HELPERS ---
   const resetToHome = () => {
       setSearchQuery(''); 
       setActiveTab('rankings'); 
@@ -560,7 +585,6 @@ const App = () => {
       setSearchQuery('');
   };
 
-  // Get available weight classes based on sport and gender
   const getAvailableWeightClasses = (s: Sport, g: Gender): string[] => {
     return weightClasses
         .filter(wc => wc.sport === s && wc.gender === g)
@@ -568,7 +592,6 @@ const App = () => {
         .map(wc => wc.name);
   };
 
-  // Initialize selectedWeightClass when data loads
   useEffect(() => {
     if (weightClasses.length > 0 && !selectedWeightClass) {
         const defaults = getAvailableWeightClasses(selectedSport, selectedGender);
@@ -603,7 +626,18 @@ const App = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [fightersSnap, eventsSnap, boutsSnap, rankingsSnap, promotionsSnap, gymsSnap, beltsSnap, weightClassesSnap] = await Promise.all([
+        const [
+            fightersSnap, 
+            eventsSnap, 
+            boutsSnap, 
+            rankingsSnap, 
+            promotionsSnap, 
+            gymsSnap, 
+            beltsSnap, 
+            weightClassesSnap,
+            fightingStylesSnap,
+            refereesSnap
+        ] = await Promise.all([
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'fighters')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'events')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'bouts')),
@@ -611,7 +645,9 @@ const App = () => {
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'promotions')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'gyms')),
             getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'belts')),
-            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'weight_classes'))
+            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'weight_classes')),
+            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'fighting_styles')),
+            getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'referees'))
         ]);
 
         setFighters(fightersSnap.docs.map(d => ({ id: d.id, ...d.data() } as Fighter)));
@@ -622,6 +658,8 @@ const App = () => {
         setGyms(gymsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Gym)));
         setBelts(beltsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Belt))); 
         setWeightClasses(weightClassesSnap.docs.map(d => ({ id: d.id, ...d.data() } as WeightClass)).sort((a,b) => a.order - b.order));
+        setFightingStyles(fightingStylesSnap.docs.map(d => ({ id: d.id, ...d.data() } as FightingStyle)));
+        setReferees(refereesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Referee)));
       } catch (err) {
         console.error("Error fetching data", err);
       }
@@ -636,7 +674,7 @@ const App = () => {
   const handleExport = async () => {
     setLoading(true);
     try {
-      const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts', 'weight_classes'];
+      const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts', 'weight_classes', 'fighting_styles', 'referees'];
       const data: any = {};
       for (const col of collections) {
         const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
@@ -695,7 +733,7 @@ const App = () => {
          async () => {
              if (!user) return;
              setLoading(true);
-             const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts', 'weight_classes'];
+             const collections = ['fighters', 'events', 'bouts', 'rankings_snapshots', 'promotions', 'gyms', 'belts', 'weight_classes', 'fighting_styles', 'referees'];
              for (const col of collections) {
                  const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', col));
                  const docs = snap.docs;
@@ -712,7 +750,7 @@ const App = () => {
      );
   };
 
-  // --- Actions ---
+  // --- Fighter Actions ---
 
   const handleCreateFighter = async (data: Partial<Fighter>) => {
     if (!user || user.isAnonymous) return;
@@ -731,7 +769,16 @@ const App = () => {
       hometown: data.hometown || '',
       active_status: 'active',
       fighter_level: data.fighter_level || 'am',
-      is_published: true
+      is_published: true,
+      // Phase 3 Details
+      nickname: data.nickname || '',
+      height: data.height || '',
+      reach: data.reach || '',
+      dob: data.dob || '',
+      stance: data.stance || 'orthodox',
+      nationality: data.nationality || '',
+      fighting_style_id: data.fighting_style_id || '',
+      bio: data.bio || ''
     };
 
     if (data.gym_id) newFighter.gym_id = data.gym_id;
@@ -752,25 +799,20 @@ const App = () => {
 
       const updates: any = {
           fighter_name: name,
-          slug: slugify(name)
+          slug: slugify(name),
+          ...data
       };
-
-      if (data.first_name !== undefined) updates.first_name = data.first_name;
-      if (data.last_name !== undefined) updates.last_name = data.last_name;
-      if (data.sport !== undefined) updates.sport = data.sport;
-      if (data.gender !== undefined) updates.gender = data.gender;
-      if (data.weight_class !== undefined) updates.weight_class = data.weight_class || '';
-      if (data.gym_id !== undefined) updates.gym_id = data.gym_id;
-      if (data.hometown !== undefined) updates.hometown = data.hometown || '';
-      if (data.fighter_level !== undefined) updates.fighter_level = data.fighter_level;
       
+      // Clean up potentially undefined values from spread
+      Object.keys(updates).forEach(key => updates[key] === undefined && delete updates[key]);
+
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', id), updates);
       setFighters(fighters.map(f => f.id === id ? { ...f, ...updates } : f));
       showNotification("Fighter updated successfully!");
   };
 
   const handleDeleteFighter = (id: string) => {
-      requestConfirmation("Are you sure you want to delete this fighter? This action cannot be undone.", async () => {
+      requestConfirmation("Are you sure you want to delete this fighter?", async () => {
           if (!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighters', id));
           setFighters(fighters.filter(f => f.id !== id));
@@ -778,7 +820,42 @@ const App = () => {
       });
   };
 
-  // --- PROMOTION ACTIONS ---
+  // --- Other CRUD Actions ---
+  
+  const handleCreateFightingStyle = async (data: Partial<FightingStyle>) => {
+      if (!user || user.isAnonymous) return;
+      const newStyle = { name: data.name || '', description: data.description || '' };
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'fighting_styles'), newStyle);
+      setFightingStyles([...fightingStyles, { ...newStyle, id: docRef.id }]);
+      showNotification("Fighting Style added.");
+  };
+
+  const handleDeleteFightingStyle = (id: string) => {
+      requestConfirmation("Delete this fighting style?", async () => {
+          if (!user || user.isAnonymous) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'fighting_styles', id));
+          setFightingStyles(fightingStyles.filter(s => s.id !== id));
+          showNotification("Style deleted.");
+      });
+  };
+
+  const handleCreateReferee = async (data: Partial<Referee>) => {
+      if (!user || user.isAnonymous) return;
+      const newRef = { name: data.name || '' };
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'referees'), newRef);
+      setReferees([...referees, { ...newRef, id: docRef.id }]);
+      showNotification("Referee added.");
+  };
+
+  const handleDeleteReferee = (id: string) => {
+      requestConfirmation("Delete this referee?", async () => {
+          if (!user || user.isAnonymous) return;
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'referees', id));
+          setReferees(referees.filter(r => r.id !== id));
+          showNotification("Referee deleted.");
+      });
+  };
+
   const handleCreatePromotion = async (data: Partial<Promotion>) => {
       if(!user || user.isAnonymous) return;
       const newPromo: any = {
@@ -793,17 +870,15 @@ const App = () => {
           website: data.website || '',
           socials: data.socials || {}
       };
-      
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'promotions'), newPromo);
       setPromotions([...promotions, { ...newPromo, id: docRef.id } as Promotion]);
-      showNotification("Promotion registered successfully!");
+      showNotification("Promotion registered!");
   };
 
   const handleUpdatePromotion = async (id: string, data: Partial<Promotion>) => {
       if(!user || user.isAnonymous) return;
       const updates: any = { ...data };
       if (data.name) updates.slug = slugify(data.name);
-      
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', id), updates);
       setPromotions(promotions.map(p => p.id === id ? { ...p, ...updates } : p));
       showNotification("Promotion updated!");
@@ -811,11 +886,7 @@ const App = () => {
 
   const handleDeletePromotion = (id: string) => {
       const hasEvents = events.some(e => e.promotion_id === id);
-      if (hasEvents) {
-          showNotification("Cannot delete: This promotion has linked events.", "error");
-          return;
-      }
-      
+      if (hasEvents) { showNotification("Cannot delete: Has linked events.", "error"); return; }
       requestConfirmation("Delete this promotion?", async () => {
           if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promotions', id));
@@ -824,22 +895,16 @@ const App = () => {
       });
   };
 
-  // --- GYM ACTIONS ---
   const handleCreateGym = async (data: Partial<Gym>) => {
       if (!user || user.isAnonymous) return;
-      const newGym: any = {
-          name: data.name || '',
-          slug: slugify(data.name || ''),
-          city: data.city || '',
-          state: data.state || 'LA'
-      };
+      const newGym = { name: data.name || '', slug: slugify(data.name || ''), city: data.city || '', state: data.state || 'LA' };
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'gyms'), newGym);
       setGyms([...gyms, { ...newGym, id: docRef.id } as Gym]);
-      showNotification("Gym registered successfully!");
+      showNotification("Gym registered!");
   };
 
   const handleDeleteGym = (id: string) => {
-      requestConfirmation("Delete this gym? Fighters linked to it will need to be updated.", async () => {
+      requestConfirmation("Delete this gym?", async () => {
           if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'gyms', id));
           setGyms(gyms.filter(g => g.id !== id));
@@ -847,43 +912,26 @@ const App = () => {
       });
   };
 
-  // --- WEIGHT CLASS ACTIONS ---
   const handleCreateWeightClass = async (data: Partial<WeightClass>) => {
       if (!user || user.isAnonymous) return;
-      const newClass: any = {
-          name: data.name || '',
-          sport: data.sport || 'mma',
-          gender: data.gender || 'men',
-          order: weightClasses.filter(wc => wc.sport === (data.sport || 'mma') && wc.gender === (data.gender || 'men')).length + 1
-      };
+      const newClass = { name: data.name || '', sport: data.sport || 'mma', gender: data.gender || 'men', order: weightClasses.length + 1 };
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'weight_classes'), newClass);
       setWeightClasses([...weightClasses, { ...newClass, id: docRef.id }].sort((a,b) => a.order - b.order));
       showNotification("Weight class added!");
   };
 
   const handleDeleteWeightClass = (id: string) => {
-      requestConfirmation("Delete this weight class?", async () => {
+      requestConfirmation("Delete class?", async () => {
           if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'weight_classes', id));
           setWeightClasses(weightClasses.filter(wc => wc.id !== id));
-          showNotification("Weight class deleted.");
       });
   };
 
   const handleCreateEvent = async (data: Partial<Event>) => {
     if (!user || user.isAnonymous) return;
-    
-    // VALIDATION: Ensure promotion is selected
-    if (!data.promotion_id) {
-        showNotification("Please select a Promotion first.", "error");
-        return;
-    }
-    if (!data.name) {
-        showNotification("Please enter an Event Name.", "error");
-        return;
-    }
-
-    const newEvent: Omit<Event, 'id'> = {
+    if (!data.promotion_id || !data.name) { showNotification("Missing required fields.", "error"); return; }
+    const newEvent = {
       promotion_id: data.promotion_id,
       name: data.name,
       slug: slugify(data.name),
@@ -893,20 +941,16 @@ const App = () => {
       state: data.state || 'LA',
       is_published: false
     };
-    
     try {
         const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'events'), newEvent);
         setEvents([...events, { ...newEvent, id: docRef.id } as Event]);
         setAdminViewEventId(docRef.id);
-        showNotification("Event draft created. You can now add bouts.");
-    } catch (error: any) {
-        console.error("Error creating event:", error);
-        showNotification(`Error creating event: ${error.message}`, "error");
-    }
+        showNotification("Event created.");
+    } catch (error: any) { showNotification(error.message, "error"); }
   };
 
   const handleDeleteEvent = (id: string) => {
-      requestConfirmation("Delete this event? Bouts linked to it will remain in the database but be hidden.", async () => {
+      requestConfirmation("Delete event?", async () => {
           if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'events', id));
           setEvents(events.filter(e => e.id !== id));
@@ -915,9 +959,41 @@ const App = () => {
       });
   };
 
+  const handlePublishEvent = async (event: Event) => {
+    if(!user || user.isAnonymous) return;
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: true });
+    bouts.filter(b => b.event_id === event.id).forEach(b => {
+        batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', b.id), { is_published: true });
+        if (b.is_title_bout && b.belt_id && b.winner_id) {
+             const beltRef = doc(db, 'artifacts', appId, 'public', 'data', 'belts', b.belt_id);
+             batch.update(beltRef, { current_champion_id: b.winner_id });
+        }
+    });
+    await batch.commit();
+    setEvents(events.map(e => e.id === event.id ? { ...e, is_published: true } : e));
+    setBouts(bouts.map(b => b.event_id === event.id ? { ...b, is_published: true } : b));
+    showNotification("Event Published!");
+  };
+
+  const handleUnpublishEvent = (event: Event) => {
+      requestConfirmation("Unpublish event?", async () => {
+          if(!user || user.isAnonymous) return;
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: false });
+          bouts.filter(b => b.event_id === event.id).forEach(b => {
+              batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', b.id), { is_published: false });
+          });
+          await batch.commit();
+          setEvents(events.map(e => e.id === event.id ? { ...e, is_published: false } : e));
+          setBouts(bouts.map(b => b.event_id === event.id ? { ...b, is_published: false } : b));
+          showNotification("Event Unpublished.");
+      });
+  };
+
   const handleCreateBelt = async (data: Partial<Belt>) => {
       if(!user || user.isAnonymous) return;
-      const newBelt: Omit<Belt, 'id'> = {
+      const newBelt = {
           promotion_id: data.promotion_id!,
           name: data.name || '',
           sport: data.sport || 'mma',
@@ -928,15 +1004,14 @@ const App = () => {
       };
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'belts'), newBelt);
       setBelts([...belts, { ...newBelt, id: docRef.id }]);
-      showNotification("Belt Created Successfully!");
+      showNotification("Belt Created!");
   };
 
   const handleDeleteBelt = (id: string) => {
-      requestConfirmation("Delete this championship belt?", async () => {
+      requestConfirmation("Delete belt?", async () => {
           if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'belts', id));
           setBelts(belts.filter(b => b.id !== id));
-          showNotification("Belt deleted.");
       });
   }
 
@@ -953,22 +1028,25 @@ const App = () => {
         red_fighter_id: boutData.red_fighter_id!,
         blue_fighter_id: boutData.blue_fighter_id!,
         is_title_bout: boutData.is_title_bout || false,
-        is_published: false
+        is_published: false,
+        // Phase 3 Details
+        method: boutData.method || '',
+        winner_id: boutData.winner_id || null,
+        method_detail: boutData.method_detail || '',
+        round: boutData.round || 1,
+        time: boutData.time || '',
+        referee_id: boutData.referee_id || '',
+        scorecards: boutData.scorecards || '',
+        belt_id: boutData.belt_id || null
     };
-
-    if (boutData.winner_id) newBout.winner_id = boutData.winner_id;
-    if (boutData.method) newBout.method = boutData.method;
-    if (boutData.round) newBout.round = boutData.round;
-    if (boutData.time) newBout.time = boutData.time;
-    if (boutData.belt_id) newBout.belt_id = boutData.belt_id;
 
     const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'bouts'), newBout);
     setBouts([...bouts, { ...newBout, id: docRef.id } as Bout]);
-    showNotification("Bout added to card.");
+    showNotification("Bout added.");
   };
 
   const handleDeleteBout = (id: string) => {
-      requestConfirmation("Remove this bout from the card?", async () => {
+      requestConfirmation("Remove bout?", async () => {
           if(!user || user.isAnonymous) return;
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'bouts', id));
           setBouts(bouts.filter(b => b.id !== id));
@@ -976,62 +1054,6 @@ const App = () => {
       });
   };
 
-  const handlePublishEvent = async (event: Event) => {
-    if(!user || user.isAnonymous) return;
-    const batch = writeBatch(db);
-
-    batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: true });
-    
-    const eventBouts = bouts.filter(b => b.event_id === event.id);
-    const updatedBouts = [...bouts];
-    const updatedBelts = [...belts];
-
-    eventBouts.forEach(b => {
-        const boutRef = doc(db, 'artifacts', appId, 'public', 'data', 'bouts', b.id);
-        batch.update(boutRef, { is_published: true });
-
-        if (b.is_title_bout && b.belt_id && b.winner_id) {
-            const beltIndex = updatedBelts.findIndex(belt => belt.id === b.belt_id);
-            if (beltIndex !== -1) {
-                const beltRef = doc(db, 'artifacts', appId, 'public', 'data', 'belts', b.belt_id);
-                batch.update(beltRef, { current_champion_id: b.winner_id });
-                updatedBelts[beltIndex] = { ...updatedBelts[beltIndex], current_champion_id: b.winner_id };
-            }
-        }
-    });
-
-    await batch.commit();
-
-    setEvents(events.map(e => e.id === event.id ? { ...e, is_published: true } : e));
-    setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: true } : b));
-    setBelts(updatedBelts); 
-    showNotification("Event Published! Rankings and Champions updated.");
-  };
-
-  const handleUnpublishEvent = (event: Event) => {
-      requestConfirmation("Unpublish this event? It will be hidden from the public and excluded from ranking calculations until republished. This allows you to edit the card.", async () => {
-          if(!user || user.isAnonymous) return;
-          const batch = writeBatch(db);
-
-          batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'events', event.id), { is_published: false });
-
-          const eventBouts = bouts.filter(b => b.event_id === event.id);
-          const updatedBouts = [...bouts];
-
-          eventBouts.forEach(b => {
-              const boutRef = doc(db, 'artifacts', appId, 'public', 'data', 'bouts', b.id);
-              batch.update(boutRef, { is_published: false });
-          });
-
-          await batch.commit();
-
-          setEvents(events.map(e => e.id === event.id ? { ...e, is_published: false } : e));
-          setBouts(updatedBouts.map(b => b.event_id === event.id ? { ...b, is_published: false } : b));
-          showNotification("Event Unpublished. You can now edit the card.");
-      });
-  };
-
-  // --- THE RANKING ENGINE ---
   const recomputeRankings = async () => {
     if (!user || user.isAnonymous) return;
     setLoading(true);
@@ -1177,6 +1199,19 @@ const App = () => {
               id: gymId, name: 'Gladiators Academy', slug: 'gladiators-academy', city: 'Lafayette', state: 'LA'
           });
 
+          // Seed Styles & Referees (Phase 3)
+          const styles = ['Muay Thai', 'Wrestling', 'BJJ', 'Boxing', 'Karate'];
+          styles.forEach(s => {
+              const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'fighting_styles'));
+              batch.set(ref, { id: ref.id, name: s, description: 'Standard style' });
+          });
+
+          const refs = ['Herb Dean', 'Mike Beltran', 'Marc Goddard', 'Dan Miragliotta'];
+          refs.forEach(r => {
+              const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'referees'));
+              batch.set(ref, { id: ref.id, name: r });
+          });
+
           // Seed Weight Classes
           let wcCount = 0;
           Object.entries(DEFAULT_WEIGHT_CLASSES).forEach(([sport, genders]) => {
@@ -1255,7 +1290,6 @@ const App = () => {
           setTimeout(() => window.location.reload(), 1000);
       });
   };
-
 
   // --- Renderers ---
 
@@ -1411,13 +1445,12 @@ const App = () => {
     );
   };
 
-  // --- PROFILE RENDERERS ---
-
   const renderFighterProfile = (fId: string) => {
       const f = fighters.find(ft => ft.id === fId);
       if (!f) return null;
 
       const gym = gyms.find(g => g.id === f.gym_id);
+      const style = fightingStyles.find(s => s.id === f.fighting_style_id);
       const heldBelts = belts.filter(b => b.current_champion_id === fId);
 
       const record = calculateFighterRecord(fId, bouts);
@@ -1435,106 +1468,123 @@ const App = () => {
                   <ChevronRight className="w-4 h-4 rotate-180 group-hover:-translate-x-1 transition-transform"/> Back
               </button>
 
-              {/* Profile Header */}
-              <div className="bg-slate-800 rounded-xl p-8 border border-slate-700 flex flex-col md:flex-row gap-8 items-center md:items-start relative overflow-hidden">
-                  <div className="w-32 h-32 md:w-48 md:h-48 bg-slate-700 rounded-full flex-shrink-0 border-4 border-slate-600 overflow-hidden shadow-2xl z-10">
-                        {f.photo_url ? <img src={f.photo_url} className="w-full h-full object-cover" /> : <Users className="w-full h-full p-8 text-slate-500"/>}
+              {/* Enhanced Header */}
+              <div className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-2xl">
+                  {/* Top Section: Photo & Identity */}
+                  <div className="p-8 flex flex-col md:flex-row gap-8 items-center md:items-start relative">
+                      <div className="w-40 h-40 bg-slate-700 rounded-full flex-shrink-0 border-4 border-slate-600 overflow-hidden shadow-2xl z-10 relative">
+                            {f.photo_url ? <img src={f.photo_url} className="w-full h-full object-cover" /> : <Users className="w-full h-full p-8 text-slate-500"/>}
+                            {f.nationality && <div className="absolute bottom-2 right-4 bg-slate-900 text-xs px-2 py-1 rounded border border-slate-600 shadow-lg">{f.nationality}</div>}
+                      </div>
+                      
+                      {heldBelts.length > 0 && <div className="absolute top-0 right-0 p-32 bg-yellow-500/10 blur-3xl rounded-full translate-x-1/2 -translate-y-1/2"></div>}
+
+                      <div className="flex-1 text-center md:text-left z-10">
+                          <div className="flex flex-col md:flex-row items-center gap-4 mb-2">
+                              <div>
+                                  {f.nickname && <div className="text-yellow-500 font-bold uppercase tracking-widest text-sm mb-1">"{f.nickname}"</div>}
+                                  <h1 className="text-5xl font-black text-white italic uppercase leading-none">{f.first_name} <span className="text-slate-400">{f.last_name}</span></h1>
+                              </div>
+                              <div className="flex gap-2 mt-2 md:mt-0">
+                                 {f.fighter_level === 'pro' && <span className="bg-black text-yellow-500 border border-yellow-500 text-xs px-2 py-1 rounded font-bold uppercase tracking-wider">Pro</span>}
+                                 <span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded font-bold uppercase tracking-wider">{f.weight_class}</span>
+                              </div>
+                          </div>
+
+                          <div className="text-xl text-slate-400 mb-6 flex flex-col md:flex-row items-center gap-2 md:gap-6">
+                              <span className={`flex items-center gap-2 ${gym ? 'cursor-pointer hover:text-white' : ''}`} onClick={() => { if(gym) { setViewingGymId(gym.id); setViewingFighterId(null); } }}>
+                                  <Shield className="w-4 h-4"/> {gym?.name || 'Independent'}
+                              </span>
+                              {f.hometown && <span className="flex items-center gap-2"><MapPin className="w-4 h-4"/> {f.hometown}</span>}
+                          </div>
+
+                          {/* Tale of the Tape Grid */}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 border-t border-slate-700 pt-6">
+                              <div>
+                                  <div className="text-xs text-slate-500 uppercase font-bold mb-1">Height</div>
+                                  <div className="text-white font-mono text-lg">{f.height || '--'}</div>
+                              </div>
+                              <div>
+                                  <div className="text-xs text-slate-500 uppercase font-bold mb-1">Reach</div>
+                                  <div className="text-white font-mono text-lg">{f.reach ? `${f.reach}"` : '--'}</div>
+                              </div>
+                              <div>
+                                  <div className="text-xs text-slate-500 uppercase font-bold mb-1">Age</div>
+                                  <div className="text-white font-mono text-lg">{calculateAge(f.dob)}</div>
+                              </div>
+                              <div>
+                                  <div className="text-xs text-slate-500 uppercase font-bold mb-1">Stance</div>
+                                  <div className="text-white font-mono text-lg capitalize">{f.stance || '--'}</div>
+                              </div>
+                          </div>
+                      </div>
                   </div>
                   
-                  {/* Background Accents for Champions */}
-                  {heldBelts.length > 0 && (
-                      <div className="absolute top-0 right-0 p-32 bg-yellow-500/10 blur-3xl rounded-full translate-x-1/2 -translate-y-1/2"></div>
-                  )}
-
-                  <div className="flex-1 text-center md:text-left z-10">
-                      <div className="flex flex-col md:flex-row items-center gap-4 mb-2">
-                          <h1 className="text-4xl font-black text-white uppercase italic">{f.first_name} <span className="text-yellow-500">{f.last_name}</span></h1>
-                          <div className="flex gap-2">
-                             {f.fighter_level === 'pro' && <span className="bg-black text-yellow-500 border border-yellow-500 text-xs px-2 py-1 rounded font-bold uppercase tracking-wider">Pro</span>}
-                             <span className="bg-slate-700 text-slate-300 text-xs px-2 py-1 rounded font-bold uppercase tracking-wider">{f.weight_class}</span>
-                          </div>
-                      </div>
-
-                      {heldBelts.length > 0 && (
-                          <div className="mb-4 flex flex-wrap gap-2 justify-center md:justify-start">
-                              {heldBelts.map(belt => (
-                                  <div key={belt.id} className="inline-flex items-center gap-2 bg-yellow-500 text-black px-3 py-1 rounded-full font-bold text-xs shadow-lg shadow-yellow-500/20">
-                                      <Crown className="w-3 h-3 fill-black"/> {belt.name} Champion
+                  {/* Bio & Style Section */}
+                  {(f.bio || style) && (
+                      <div className="bg-slate-900/50 px-8 py-6 border-t border-slate-700">
+                          <div className="flex flex-col md:flex-row gap-8">
+                              {style && (
+                                  <div className="min-w-[200px]">
+                                      <div className="text-xs text-slate-500 uppercase font-bold mb-2">Fighting Style</div>
+                                      <div className="text-yellow-500 font-bold text-lg">{style.name}</div>
+                                      <p className="text-slate-400 text-xs mt-1">{style.description}</p>
                                   </div>
-                              ))}
+                              )}
+                              {f.bio && (
+                                  <div className="flex-1">
+                                      <div className="text-xs text-slate-500 uppercase font-bold mb-2">Bio</div>
+                                      <p className="text-slate-300 text-sm leading-relaxed">{f.bio}</p>
+                                  </div>
+                              )}
                           </div>
-                      )}
-                      
-                      <div className="text-xl text-slate-400 mb-6 flex flex-col md:flex-row items-center gap-2 md:gap-6">
-                          <span 
-                            className={`flex items-center gap-2 ${gym ? 'cursor-pointer hover:text-white' : ''}`}
-                            onClick={() => {
-                                if (gym) {
-                                    setViewingGymId(gym.id);
-                                    setViewingFighterId(null);
-                                }
-                            }}
-                          >
-                              <Shield className="w-4 h-4"/> {gym?.name || 'Independent'}
-                          </span>
-                          {f.hometown && <span className="flex items-center gap-2"><div className="w-1 h-1 bg-slate-500 rounded-full"/> {f.hometown}</span>}
                       </div>
+                  )}
+              </div>
 
-                      <div className="grid grid-cols-3 gap-4 max-w-md mx-auto md:mx-0">
-                          <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
-                              <div className="text-2xl font-bold text-white">{record.wins}-{record.losses}-{record.draws}</div>
-                              <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Record</div>
-                          </div>
-                            <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
-                              <div className="text-2xl font-bold text-yellow-500">
-                                  {rankings.find(r => r.fighter_id === fId)?.score.toFixed(0) || 'N/A'}
-                              </div>
-                              <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Rating</div>
-                          </div>
-                            <div className="bg-slate-900/50 p-3 rounded border border-slate-700 text-center">
-                              <div className="text-2xl font-bold text-white">#{rankings.find(r => r.fighter_id === fId)?.rank || '-'}</div>
-                              <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Rank</div>
-                          </div>
-                      </div>
+              <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-slate-800 p-4 rounded border border-slate-700 text-center">
+                      <div className="text-3xl font-black text-white">{record.wins}-{record.losses}-{record.draws}</div>
+                      <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Career Record</div>
+                  </div>
+                  <div className="bg-slate-800 p-4 rounded border border-slate-700 text-center">
+                      <div className="text-3xl font-black text-yellow-500">{rankings.find(r => r.fighter_id === fId)?.score.toFixed(0) || 'N/A'}</div>
+                      <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Elo Rating</div>
+                  </div>
+                  <div className="bg-slate-800 p-4 rounded border border-slate-700 text-center">
+                      <div className="text-3xl font-black text-white">#{rankings.find(r => r.fighter_id === fId)?.rank || '-'}</div>
+                      <div className="text-[10px] uppercase text-slate-500 font-bold tracking-widest">Rank</div>
                   </div>
               </div>
 
               <div className="space-y-4">
                   <h3 className="text-xl font-bold text-white flex items-center gap-2"><Activity className="text-yellow-500"/> Fight History</h3>
-                  {history.length > 0 ? history.map((bout) => {
-                      const opponentId = bout.red_fighter_id === fId ? bout.blue_fighter_id : bout.red_fighter_id;
-                      const opponent = fighters.find(ft => ft.id === opponentId);
+                  {history.map((bout) => {
+                      const opponent = fighters.find(ft => ft.id === (bout.red_fighter_id === fId ? bout.blue_fighter_id : bout.red_fighter_id));
                       const evt = events.find(e => e.id === bout.event_id);
                       const isWin = bout.winner_id === fId;
-                      const isTitle = bout.is_title_bout;
                       
-                      let resultBadge = <span className="bg-red-900 text-red-200 px-2 py-1 rounded text-xs font-bold w-12 text-center inline-block">LOSS</span>;
-                      if (isWin) resultBadge = <span className="bg-green-900 text-green-200 px-2 py-1 rounded text-xs font-bold w-12 text-center inline-block">WIN</span>;
-                      if (bout.winner_id === 'draw' || (!bout.winner_id && bout.method === 'draw')) resultBadge = <span className="bg-slate-600 text-slate-200 px-2 py-1 rounded text-xs font-bold w-12 text-center inline-block">DRAW</span>;
-
                       return (
-                          <div key={bout.id} className={`bg-slate-800 p-4 rounded-lg border ${isTitle ? 'border-yellow-500/50 shadow-lg shadow-yellow-500/10' : 'border-slate-700'} flex items-center justify-between hover:bg-slate-750 transition-colors`}>
+                          <div key={bout.id} className="bg-slate-800 p-4 rounded-lg border border-slate-700 flex items-center justify-between hover:bg-slate-750 transition-colors">
                               <div className="flex items-center gap-6">
-                                  {resultBadge}
+                                  <span className={`px-2 py-1 rounded text-xs font-bold w-12 text-center inline-block ${isWin ? 'bg-green-900 text-green-200' : (!bout.winner_id ? 'bg-slate-600 text-slate-200' : 'bg-red-900 text-red-200')}`}>
+                                      {isWin ? 'WIN' : (!bout.winner_id ? 'DRAW' : 'LOSS')}
+                                  </span>
                                   <div>
-                                      <div className="font-bold text-white text-lg flex items-center gap-2">
-                                          vs. {opponent?.fighter_name}
-                                          {isTitle && <Crown className="w-3 h-3 text-yellow-500"/>}
-                                      </div>
+                                      <div className="font-bold text-white text-lg">vs. {opponent?.fighter_name}</div>
                                       <div className="text-xs text-slate-400">{evt?.name} • {evt?.event_date}</div>
                                   </div>
                               </div>
                               <div className="text-right">
-                                  <div className="text-sm font-medium text-slate-300 uppercase">{bout.method?.replace('_', ' ')}</div>
-                                  <div className="text-xs text-slate-500">
-                                      {bout.round ? `R${bout.round}` : ''} {bout.time ? `@ ${bout.time}` : ''}
+                                  <div className="text-sm font-medium text-slate-300 uppercase">{bout.method_detail || bout.method?.replace('_', ' ')}</div>
+                                  <div className="text-xs text-slate-500 flex items-center gap-1 justify-end">
+                                      {bout.time && <span className="flex items-center gap-1"><Clock className="w-3 h-3"/> {bout.time}</span>}
+                                      {bout.round && <span>R{bout.round}</span>}
                                   </div>
                               </div>
                           </div>
                       );
-                  }) : (
-                      <div className="p-8 text-center text-slate-500 bg-slate-800/50 rounded border border-slate-700 border-dashed">No fight history available.</div>
-                  )}
+                  })}
               </div>
           </div>
       );
@@ -1639,7 +1689,7 @@ const App = () => {
                       <div>
                           <div className="text-yellow-500 text-sm font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
                               {promo.region} 
-                              {promo.acronym && <span className="bg-slate-700 px-1 rounded text-white">{promo.acronym}</span>}
+                              {promo.acronym && <span className="bg-slate-700 px-1 rounded text-slate-300">{promo.acronym}</span>}
                           </div>
                           <h1 className="text-4xl font-black text-white italic">{promo.name}</h1>
                           <div className="flex items-center gap-4 mt-4 text-slate-400">
@@ -1741,6 +1791,7 @@ const App = () => {
                         const blue = fighters.find(f => f.id === bout.blue_fighter_id);
                         const isRedWin = bout.winner_id === red?.id;
                         const isBlueWin = bout.winner_id === blue?.id;
+                        const ref = referees.find(r => r.id === bout.referee_id);
                         
                         return (
                             <div key={bout.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden flex flex-col md:flex-row">
@@ -1760,10 +1811,16 @@ const App = () => {
                                     <div className="px-8 flex flex-col items-center">
                                         <span className="text-slate-600 font-black italic text-2xl">VS</span>
                                         {bout.method && (
-                                            <div className="text-xs text-slate-400 mt-1 uppercase tracking-wide border border-slate-600 px-2 rounded">
-                                                {bout.method.replace('_', ' ')}
+                                            <div className="text-center mt-2">
+                                                <div className="text-xs text-white font-bold uppercase tracking-wide border border-slate-600 px-2 py-1 rounded bg-slate-700">
+                                                    {bout.method_detail || bout.method.replace('_', ' ')}
+                                                </div>
+                                                <div className="text-[10px] text-slate-400 mt-1">
+                                                    {bout.round ? `R${bout.round}` : ''} {bout.time ? ` ${bout.time}` : ''}
+                                                </div>
                                             </div>
                                         )}
+                                        {ref && <div className="text-[10px] text-slate-500 mt-2 flex items-center gap-1"><UserCheck className="w-3 h-3"/> {ref.name}</div>}
                                         {bout.is_title_bout && <Crown className="w-5 h-5 text-yellow-500 mt-2"/>}
                                     </div>
 
@@ -2193,121 +2250,9 @@ const App = () => {
     );
   };
 
-  const AdminFighterManager = () => {
-    // Initial state matching default
-    const [form, setForm] = useState<Partial<Fighter>>({ sport: 'mma', gender: 'men', weight_class: '' });
-    const [editingId, setEditingId] = useState<string | null>(null);
-
-    // Update weight class when sport/gender changes if not editing
-    useEffect(() => {
-        if (!editingId && !form.weight_class) {
-             const classes = getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men');
-             if (classes.length > 0) setForm(f => ({ ...f, weight_class: classes[0] }));
-        }
-    }, [form.sport, form.gender, weightClasses, editingId]);
-
-    const handleEditClick = (fighter: Fighter) => {
-        setForm(fighter);
-        setEditingId(fighter.id);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-
-    const handleCancelEdit = () => {
-        setForm({ sport: 'mma', gender: 'men' });
-        setEditingId(null);
-    };
-
-    const handleSubmit = () => {
-        if (editingId) {
-            handleUpdateFighter(editingId, form);
-        } else {
-            handleCreateFighter(form);
-        }
-        setForm({ sport: 'mma', gender: 'men' });
-        setEditingId(null);
-    };
-
-    return (
-        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
-             <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-bold text-white">{editingId ? 'Edit Fighter' : 'Fighter Registry'}</h2>
-                <button onClick={handleCancelEdit} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div className="space-y-4">
-                    <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="First Name" value={form.first_name || ''} onChange={e => setForm({...form, first_name: e.target.value})} />
-                    <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Last Name" value={form.last_name || ''} onChange={e => setForm({...form, last_name: e.target.value})} />
-                    <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gym_id || ''} onChange={e => setForm({...form, gym_id: e.target.value})}>
-                        <option value="">Select Gym (Optional)</option>
-                        {gyms.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                    </select>
-                </div>
-                <div className="space-y-4">
-                     <div className="grid grid-cols-2 gap-4">
-                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.sport} onChange={e => {
-                            const s = e.target.value as Sport;
-                            setForm({...form, sport: s});
-                        }}>
-                             {Object.entries(SPORTS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-                        </select>
-                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gender} onChange={e => {
-                            const g = e.target.value as Gender;
-                            setForm({...form, gender: g});
-                        }}>
-                            <option value="men">Men</option>
-                            <option value="women">Women</option>
-                        </select>
-                     </div>
-                     <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.weight_class} onChange={e => setForm({...form, weight_class: e.target.value})}>
-                        {getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men').map(w => <option key={w} value={w}>{w}</option>)}
-                     </select>
-                     <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.fighter_level || 'am'} onChange={e => setForm({...form, fighter_level: e.target.value as FighterLevel})}>
-                        <option value="am">Amateur (Start 1450)</option>
-                        <option value="pro">Professional (Start 1500)</option>
-                     </select>
-                </div>
-            </div>
-            <div className="flex gap-2">
-                <button onClick={handleSubmit} className="bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 px-6 rounded flex items-center gap-2">
-                    {editingId ? <Save className="w-4 h-4"/> : <Plus className="w-4 h-4"/>}
-                    {editingId ? 'Update Fighter' : 'Register Fighter'}
-                </button>
-                {editingId && (
-                    <button onClick={handleCancelEdit} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-2 px-6 rounded">
-                        Cancel
-                    </button>
-                )}
-            </div>
-
-            <div className="mt-8 pt-8 border-t border-slate-700">
-                <h3 className="text-white font-bold mb-4">Recent Registrations</h3>
-                <div className="space-y-2">
-                    {fighters.slice().reverse().slice(0, 10).map(f => (
-                        <div key={f.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group">
-                            <div>
-                                <span className="text-white font-medium">{f.fighter_name}</span>
-                                <span className="text-xs text-slate-400 block">{f.sport.toUpperCase()} • {f.weight_class}</span>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => handleEditClick(f)} className="text-slate-500 hover:text-yellow-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                    <Pencil className="w-4 h-4"/>
-                                </button>
-                                <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                    <Trash2 className="w-4 h-4"/>
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-  };
-
   const AdminBeltManager = () => {
     const [form, setForm] = useState<Partial<Belt>>({ sport: 'mma', gender: 'men' });
     
-    // UPDATED: Pre-select weight class to avoid undefined submissions
     useEffect(() => {
         if (!form.weight_class) {
              const classes = getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men');
@@ -2452,12 +2397,159 @@ const App = () => {
     );
   };
 
+  const AdminRefereeManager = () => {
+      const [name, setName] = useState('');
+      return (
+          <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
+              <h2 className="text-xl font-bold text-white mb-6">Referee Registry</h2>
+              <div className="flex gap-2 mb-8">
+                  <input className="flex-1 bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Referee Name" value={name} onChange={e => setName(e.target.value)}/>
+                  <button onClick={() => { handleCreateReferee({name}); setName(''); }} disabled={!name} className="bg-yellow-500 text-black font-bold px-4 rounded">Add</button>
+              </div>
+              <div className="space-y-2">
+                  {referees.map(r => (
+                      <div key={r.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded">
+                          <span className="text-white">{r.name}</span>
+                          <button onClick={() => handleDeleteReferee(r.id)} className="text-slate-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      );
+  };
+
+  const AdminFightingStyleManager = () => {
+      const [form, setForm] = useState({ name: '', description: '' });
+      return (
+          <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
+              <h2 className="text-xl font-bold text-white mb-6">Fighting Styles</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                  <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Style Name (e.g. Muay Thai)" value={form.name} onChange={e => setForm({...form, name: e.target.value})}/>
+                  <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Description" value={form.description} onChange={e => setForm({...form, description: e.target.value})}/>
+              </div>
+              <button onClick={() => { handleCreateFightingStyle(form); setForm({name:'', description:''}); }} disabled={!form.name} className="bg-yellow-500 text-black font-bold px-6 py-2 rounded mb-8">Add Style</button>
+              <div className="space-y-2">
+                  {fightingStyles.map(s => (
+                      <div key={s.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded">
+                          <div>
+                              <div className="text-white font-bold">{s.name}</div>
+                              <div className="text-xs text-slate-400">{s.description}</div>
+                          </div>
+                          <button onClick={() => handleDeleteFightingStyle(s.id)} className="text-slate-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      );
+  };
+
+  const AdminFighterManager = () => {
+    const [form, setForm] = useState<Partial<Fighter>>({ sport: 'mma', gender: 'men', weight_class: '' });
+    const [editingId, setEditingId] = useState<string | null>(null);
+
+    const handleEditClick = (fighter: Fighter) => {
+        setForm(fighter);
+        setEditingId(fighter.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleSubmit = () => {
+        if (editingId) handleUpdateFighter(editingId, form);
+        else handleCreateFighter(form);
+        setForm({ sport: 'mma', gender: 'men' });
+        setEditingId(null);
+    };
+
+    return (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
+             <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-white">{editingId ? 'Edit Fighter' : 'Fighter Registry'}</h2>
+                <button onClick={() => { setForm({ sport: 'mma', gender: 'men' }); setEditingId(null); }} className="text-sm text-yellow-500 hover:underline">Reset Form</button>
+            </div>
+            
+            <div className="space-y-6 mb-8">
+                {/* Section 1: Core Identity */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="First Name" value={form.first_name || ''} onChange={e => setForm({...form, first_name: e.target.value})} />
+                    <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Last Name" value={form.last_name || ''} onChange={e => setForm({...form, last_name: e.target.value})} />
+                    <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Nickname (e.g. 'The Diamond')" value={form.nickname || ''} onChange={e => setForm({...form, nickname: e.target.value})} />
+                    <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gym_id || ''} onChange={e => setForm({...form, gym_id: e.target.value})}>
+                        <option value="">Select Gym</option>
+                        {gyms.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                </div>
+
+                {/* Section 2: Tale of the Tape */}
+                <div className="border-t border-slate-700 pt-4">
+                    <h3 className="text-sm text-slate-400 font-bold uppercase mb-3">Tale of the Tape</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Height (e.g. 5'9)" value={form.height || ''} onChange={e => setForm({...form, height: e.target.value})} />
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Reach (in)" value={form.reach || ''} onChange={e => setForm({...form, reach: e.target.value})} />
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.stance || 'orthodox'} onChange={e => setForm({...form, stance: e.target.value as Stance})}>
+                            <option value="orthodox">Orthodox</option>
+                            <option value="southpaw">Southpaw</option>
+                            <option value="switch">Switch</option>
+                        </select>
+                        <input type="date" className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="DOB" value={form.dob || ''} onChange={e => setForm({...form, dob: e.target.value})} />
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.fighting_style_id || ''} onChange={e => setForm({...form, fighting_style_id: e.target.value})}>
+                            <option value="">Select Fighting Style</option>
+                            {fightingStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Nationality (Code, e.g. USA)" value={form.nationality || ''} onChange={e => setForm({...form, nationality: e.target.value})} />
+                    </div>
+                </div>
+
+                {/* Section 3: Classification & Bio */}
+                <div className="border-t border-slate-700 pt-4">
+                    <h3 className="text-sm text-slate-400 font-bold uppercase mb-3">Classification & Bio</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.sport} onChange={e => setForm({...form, sport: e.target.value as Sport})}>
+                             {Object.entries(SPORTS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                        </select>
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.gender} onChange={e => setForm({...form, gender: e.target.value as Gender})}>
+                            <option value="men">Men</option>
+                            <option value="women">Women</option>
+                        </select>
+                        <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={form.weight_class} onChange={e => setForm({...form, weight_class: e.target.value})}>
+                            {getAvailableWeightClasses(form.sport || 'mma', form.gender || 'men').map(w => <option key={w} value={w}>{w}</option>)}
+                        </select>
+                    </div>
+                    <textarea className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2 h-24" placeholder="Fighter Bio / Background..." value={form.bio || ''} onChange={e => setForm({...form, bio: e.target.value})} />
+                </div>
+            </div>
+
+            <button onClick={handleSubmit} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-3 rounded flex items-center justify-center gap-2">
+                {editingId ? <Save className="w-4 h-4"/> : <Plus className="w-4 h-4"/>}
+                {editingId ? 'Update Fighter Profile' : 'Register New Fighter'}
+            </button>
+
+            {/* List */}
+            <div className="mt-8 pt-8 border-t border-slate-700">
+                <div className="space-y-2">
+                    {fighters.slice().reverse().slice(0, 10).map(f => (
+                        <div key={f.id} className="flex justify-between items-center bg-slate-700/50 p-3 rounded group">
+                            <div>
+                                <span className="text-white font-medium">{f.fighter_name}</span>
+                                {f.nickname && <span className="text-xs text-yellow-500 ml-2">"{f.nickname}"</span>}
+                                <span className="text-xs text-slate-400 block">{f.sport.toUpperCase()} • {f.weight_class}</span>
+                            </div>
+                            <div className="flex gap-2">
+                                <button onClick={() => handleEditClick(f)} className="text-slate-500 hover:text-yellow-500 p-2"><Pencil className="w-4 h-4"/></button>
+                                <button onClick={() => handleDeleteFighter(f.id)} className="text-slate-500 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+  };
+
   const AdminEventManager = () => {
       const [newEvent, setNewEvent] = useState<Partial<Event>>({ state: 'LA' });
       const [viewingEvent, setViewingEvent] = useState<string | null>(null);
-
-      // Derived state for button validation
-      const isValid = newEvent.promotion_id && newEvent.name;
 
       if (adminViewEventId) {
           const evt = events.find(e => e.id === adminViewEventId);
@@ -2485,7 +2577,6 @@ const App = () => {
                       )}
                   </div>
 
-                  {/* Bout Entry - Only visible if unpublished */}
                   {!evt.is_published && (
                       <div className="bg-slate-800 p-6 rounded-xl border border-slate-700">
                           <h3 className="text-white font-bold mb-4">Add Bout</h3>
@@ -2493,7 +2584,6 @@ const App = () => {
                       </div>
                   )}
 
-                  {/* Bout List */}
                   <div className="space-y-3">
                       {evtBouts.map((bout, idx) => {
                           const red = fighters.find(f => f.id === bout.red_fighter_id);
@@ -2514,8 +2604,8 @@ const App = () => {
                                   <div className="flex items-center gap-4">
                                       <div className="text-right flex flex-col items-end">
                                           <div className="text-white text-sm font-medium">{bout.method ? bout.method.toUpperCase().replace('_', '/') : 'PENDING'}</div>
+                                          {bout.method_detail && <div className="text-[10px] text-slate-400">{bout.method_detail} {bout.time && `(${bout.time})`}</div>}
                                           {bout.winner_id && <div className="text-xs text-yellow-500">Winner: {bout.winner_id === red?.id ? red?.fighter_name : blue?.fighter_name}</div>}
-                                          {bout.is_title_bout && <span className="text-[10px] flex items-center gap-1 text-yellow-500 mt-1"><Crown className="w-3 h-3"/> Title Fight</span>}
                                       </div>
                                       {!evt.is_published && (
                                           <button onClick={() => handleDeleteBout(bout.id)} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
@@ -2541,54 +2631,39 @@ const App = () => {
                             <option value="">Select Promotion</option>
                             {promotions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
-                        <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Event Name (e.g. BFN 34)" value={newEvent.name || ''} onChange={e => setNewEvent({...newEvent, name: e.target.value})} />
+                        <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Event Name" value={newEvent.name || ''} onChange={e => setNewEvent({...newEvent, name: e.target.value})} />
                         <input type="date" className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={newEvent.event_date || ''} onChange={e => setNewEvent({...newEvent, event_date: e.target.value})} />
                         <input className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Venue" value={newEvent.venue || ''} onChange={e => setNewEvent({...newEvent, venue: e.target.value})} />
                         <div className="grid grid-cols-2 gap-4">
                             <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="City" value={newEvent.city || ''} onChange={e => setNewEvent({...newEvent, city: e.target.value})} />
                             <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="State" value={newEvent.state || ''} onChange={e => setNewEvent({...newEvent, state: e.target.value})} />
                         </div>
-                        <button 
-                            onClick={() => handleCreateEvent(newEvent)} 
-                            disabled={!isValid}
-                            className={`w-full font-bold py-2 rounded transition-colors ${isValid ? 'bg-yellow-500 hover:bg-yellow-400 text-black' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
-                        >
-                            Create Event Draft
-                        </button>
+                        <button onClick={() => handleCreateEvent(newEvent)} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2 rounded">Create Event Draft</button>
                     </div>
                 </div>
               </div>
-
               <div className="space-y-4">
                   <h3 className="text-white font-bold">Draft Events</h3>
                   {events.filter(e => !e.is_published).map(e => (
                       <div key={e.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors flex justify-between items-center group">
                           <div onClick={() => setAdminViewEventId(e.id)} className="flex-1">
                               <div className="font-bold text-white">{e.name}</div>
-                              <div className="text-xs text-slate-400">{e.event_date} • {e.venue}</div>
+                              <div className="text-xs text-slate-400">{e.event_date}</div>
                           </div>
                           <div className="flex items-center gap-2">
-                              <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                  <Trash2 className="w-4 h-4"/>
-                              </button>
+                              <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
                               <ChevronRight className="text-slate-600"/>
                           </div>
                       </div>
                   ))}
-                  
                   <h3 className="text-white font-bold pt-6">Published Events</h3>
                   {events.filter(e => e.is_published).map(e => (
                       <div key={e.id} className="bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-yellow-500 cursor-pointer transition-colors opacity-75">
                           <div onClick={() => setAdminViewEventId(e.id)} className="flex justify-between items-center flex-1">
-                            <div>
-                                <div className="font-bold text-white">{e.name}</div>
-                                <div className="text-xs text-slate-400">{e.event_date}</div>
-                            </div>
+                            <div><div className="font-bold text-white">{e.name}</div><div className="text-xs text-slate-400">{e.event_date}</div></div>
                             <span className="text-xs bg-green-900 text-green-300 px-2 py-1 rounded mr-4">Live</span>
                           </div>
-                          <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                              <Trash2 className="w-4 h-4"/>
-                          </button>
+                          <button onClick={(ev) => { ev.stopPropagation(); handleDeleteEvent(e.id); }} className="text-slate-500 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
                       </div>
                   ))}
               </div>
@@ -2598,32 +2673,23 @@ const App = () => {
 
   const BoutEntryForm = ({ event, onAdd, fighters, existingBouts }: { event: Event, onAdd: (b: Partial<Bout>) => void, fighters: Fighter[], existingBouts: Bout[] }) => {
       const [bout, setBout] = useState<Partial<Bout>>({ 
-          sport: 'mma', gender: 'men', weight_class: '' ,
+          sport: 'mma', gender: 'men', weight_class: '',
           event_id: event.id
       });
-      
-      // Update weight class defaults
-       useEffect(() => {
+      // ... (filters same as before) ...
+      const availableFighters = fighters.filter(f => f.sport === bout.sport && f.gender === bout.gender);
+      const bookedFighterIds = new Set(existingBouts.flatMap(b => [b.red_fighter_id, b.blue_fighter_id]));
+      const unbookedFighters = availableFighters.filter(f => !bookedFighterIds.has(f.id));
+      const availableRedFighters = unbookedFighters.filter(f => f.id !== bout.blue_fighter_id);
+      const availableBlueFighters = unbookedFighters.filter(f => f.id !== bout.red_fighter_id);
+      const availableBelts = belts.filter(b => b.promotion_id === event.promotion_id && b.sport === bout.sport && b.gender === bout.gender && b.weight_class === bout.weight_class);
+
+      useEffect(() => {
         if (!bout.weight_class) {
              const classes = getAvailableWeightClasses(bout.sport || 'mma', bout.gender || 'men');
              if (classes.length > 0) setBout(b => ({ ...b, weight_class: classes[0] }));
         }
-       }, [bout.sport, bout.gender, weightClasses]);
-
-
-      // Filter fighters by selected criteria
-      const availableFighters = fighters.filter(f => f.sport === bout.sport && f.gender === bout.gender);
-      
-      // Filter out selected fighters so they can't fight themselves and prevent double booking
-      const bookedFighterIds = new Set(existingBouts.flatMap(b => [b.red_fighter_id, b.blue_fighter_id]));
-      
-      const unbookedFighters = availableFighters.filter(f => !bookedFighterIds.has(f.id));
-
-      const availableRedFighters = unbookedFighters.filter(f => f.id !== bout.blue_fighter_id);
-      const availableBlueFighters = unbookedFighters.filter(f => f.id !== bout.red_fighter_id);
-      
-      // Filter available belts
-      const availableBelts = belts.filter(b => b.promotion_id === event.promotion_id && b.sport === bout.sport && b.gender === bout.gender && b.weight_class === bout.weight_class);
+      }, [bout.sport, bout.gender, weightClasses]);
 
       return (
           <div className="space-y-4">
@@ -2644,7 +2710,6 @@ const App = () => {
               <div className="flex items-center gap-2 p-2 bg-slate-700/50 rounded border border-slate-600">
                   <input type="checkbox" id="is_title" checked={bout.is_title_bout || false} onChange={e => setBout({...bout, is_title_bout: e.target.checked})} className="w-5 h-5 text-yellow-500 rounded focus:ring-yellow-500 bg-slate-800 border-slate-600"/>
                   <label htmlFor="is_title" className="text-white font-bold flex items-center gap-2"><Crown className="w-4 h-4 text-yellow-500"/> Title Fight?</label>
-                  
                   {bout.is_title_bout && (
                       <select className="ml-auto bg-slate-800 border border-slate-600 text-white rounded p-1 text-sm max-w-[200px]" value={bout.belt_id || ''} onChange={e => setBout({...bout, belt_id: e.target.value})}>
                           <option value="">Select Belt...</option>
@@ -2670,8 +2735,9 @@ const App = () => {
                   </div>
               </div>
               
-              <div className="p-4 bg-slate-700/30 rounded border border-slate-700">
-                  <label className="text-slate-400 text-xs font-bold uppercase mb-2 block">Outcome (Optional - can be added later)</label>
+              {/* Phase 3: Detailed Outcome Fields */}
+              <div className="p-4 bg-slate-700/30 rounded border border-slate-700 space-y-4">
+                  <label className="text-slate-400 text-xs font-bold uppercase block">Official Outcome</label>
                   <div className="grid grid-cols-2 gap-4">
                       <select className="w-full bg-slate-700 border border-slate-600 text-white rounded p-2" value={bout.winner_id || ''} onChange={e => setBout({...bout, winner_id: e.target.value})}>
                           <option value="">No Result Yet</option>
@@ -2686,7 +2752,22 @@ const App = () => {
                           <option value="ud">Unanimous Decision</option>
                           <option value="md_td">Majority/Tech Decision</option>
                           <option value="sd">Split Decision</option>
+                          <option value="dq_doctor">DQ / Doctor Stoppage</option>
                       </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                      <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Detail (e.g. Rear Naked Choke)" value={bout.method_detail || ''} onChange={e => setBout({...bout, method_detail: e.target.value})} />
+                      <div className="grid grid-cols-2 gap-2">
+                          <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" type="number" placeholder="Rnd" value={bout.round || ''} onChange={e => setBout({...bout, round: parseInt(e.target.value)})} />
+                          <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Time" value={bout.time || ''} onChange={e => setBout({...bout, time: e.target.value})} />
+                      </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                      <select className="bg-slate-700 border border-slate-600 text-white rounded p-2" value={bout.referee_id || ''} onChange={e => setBout({...bout, referee_id: e.target.value})}>
+                          <option value="">Select Referee</option>
+                          {referees.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      </select>
+                      <input className="bg-slate-700 border border-slate-600 text-white rounded p-2" placeholder="Scorecards (29-28, 30-27...)" value={bout.scorecards || ''} onChange={e => setBout({...bout, scorecards: e.target.value})} />
                   </div>
               </div>
 
@@ -2697,30 +2778,20 @@ const App = () => {
       )
   };
 
-
-  // --- Layout ---
-
+  // ... (Layout & Footer) ... 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans selection:bg-yellow-500/30 relative">
-      {/* Global Modal & Notification */}
       {modalConfig && <ConfirmModal isOpen={modalConfig.isOpen} message={modalConfig.message} onConfirm={modalConfig.onConfirm} onCancel={() => setModalConfig(null)} requireTyping={modalConfig.requireTyping} />}
       <LoginModal isOpen={showLogin} onClose={() => setShowLogin(false)} onSuccess={() => { setShowLogin(false); setActiveTab('admin_dashboard'); }} />
       {notification && <NotificationToast message={notification.message} type={notification.type} onClose={() => setNotification(null)} />}
 
-      {/* Navigation */}
       <nav className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between h-20">
             <div className="flex items-center gap-6 flex-1">
-               {/* Logo & Branding */}
               <div className="flex items-center gap-3 cursor-pointer" onClick={resetToHome}>
                  <div className="w-12 h-12 bg-black rounded-full border border-slate-700 overflow-hidden flex items-center justify-center">
-                    {/* Updated Logo URL */}
-                    <img src="https://drive.google.com/uc?export=view&id=1ucjGjhPycGWUhkgNUujXeExL0ZlgBAmO" alt="BFN Logo" className="w-full h-full object-cover" onError={(e) => {
-                        // Fallback if image not found
-                        e.currentTarget.style.display='none';
-                        e.currentTarget.parentElement?.classList.add('bg-yellow-500');
-                    }}/>
+                    <img src="https://drive.google.com/uc?export=view&id=1ucjGjhPycGWUhkgNUujXeExL0ZlgBAmO" alt="BFN Logo" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display='none'; e.currentTarget.parentElement?.classList.add('bg-yellow-500'); }}/>
                     <Shield className="w-6 h-6 text-black hidden" fill="currentColor" /> 
                  </div>
                  <div className="flex flex-col">
@@ -2731,92 +2802,46 @@ const App = () => {
               
               {!isAdminMode && (
                 <div className="hidden md:flex gap-1 ml-8">
-                  <button 
-                    onClick={resetToRankings} 
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'rankings' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    Rankings
-                  </button>
-                  <button 
-                    onClick={resetToEvents} 
-                    className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'events' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    Events
-                  </button>
+                  <button onClick={resetToRankings} className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'rankings' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}>Rankings</button>
+                  <button onClick={resetToEvents} className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${activeTab === 'events' && !searchQuery ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'}`}>Events</button>
                 </div>
               )}
 
-              {/* SEARCH BAR */}
               <div className="flex-1 max-w-md ml-4 relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Search className="h-4 w-4 text-slate-500" />
-                  </div>
-                  <input 
-                      type="text"
-                      className="bg-slate-800 border border-slate-700 text-white text-sm rounded-full block w-full pl-10 p-2.5 focus:border-yellow-500 outline-none transition-colors"
-                      placeholder="Search fighters, events, gyms..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                  {searchQuery && (
-                      <button onClick={() => setSearchQuery('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-white">
-                          <X className="h-4 w-4"/>
-                      </button>
-                  )}
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-4 w-4 text-slate-500" /></div>
+                  <input type="text" className="bg-slate-800 border border-slate-700 text-white text-sm rounded-full block w-full pl-10 p-2.5 focus:border-yellow-500 outline-none transition-colors" placeholder="Search fighters, events, gyms..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
+                  {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-white"><X className="h-4 w-4"/></button>}
               </div>
             </div>
 
             <div className="flex items-center gap-4 ml-4">
                {isAdminMode ? (
-                   <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors flex items-center gap-2 hidden md:flex">
-                       <LogOut className="w-3 h-3"/> SIGN OUT
-                   </button>
+                   <button onClick={handleLogout} className="text-xs bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded font-bold transition-colors flex items-center gap-2 hidden md:flex"><LogOut className="w-3 h-3"/> SIGN OUT</button>
                ) : (
-                   <button onClick={() => setShowLogin(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors hidden md:flex">
-                       <Lock className="w-4 h-4"/> <span className="text-xs font-bold hidden md:inline">STAFF</span>
-                   </button>
+                   <button onClick={() => setShowLogin(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors hidden md:flex"><Lock className="w-6 h-6" /><span className="text-[10px] font-bold uppercase">Staff</span></button>
                )}
             </div>
           </div>
         </div>
       </nav>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8 pb-24 md:pb-8">
-        {loading ? (
-            <LoadingSpinner />
-        ) : searchQuery ? (
-            <SearchResults />
-        ) : (
+        {loading ? <LoadingSpinner /> : searchQuery ? <SearchResults /> : (
             <>
-                {/* Admin Mode Header */}
                 {isAdminMode && (
                     <div className="mb-8 flex gap-4 overflow-x-auto pb-2 border-b border-slate-800">
-                        <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_dashboard' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Activity className="w-4 h-4"/> Dashboard
-                        </button>
-                        <button onClick={() => setActiveTab('admin_events')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_events' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Calendar className="w-4 h-4"/> Event Manager
-                        </button>
-                        <button onClick={() => setActiveTab('admin_fighters')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_fighters' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Users className="w-4 h-4"/> Fighter Manager
-                        </button>
-                        <button onClick={() => setActiveTab('admin_promotions')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_promotions' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Globe className="w-4 h-4"/> Promotion Manager
-                        </button>
-                        <button onClick={() => setActiveTab('admin_gyms')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_gyms' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Building2 className="w-4 h-4"/> Gym Manager
-                        </button>
-                        <button onClick={() => setActiveTab('admin_weight_classes')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_weight_classes' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Scale className="w-4 h-4"/> Weight Classes
-                        </button>
-                        <button onClick={() => setActiveTab('admin_belts')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_belts' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}>
-                            <Crown className="w-4 h-4"/> Belt Manager
-                        </button>
+                        <button onClick={() => setActiveTab('admin_dashboard')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_dashboard' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Activity className="w-4 h-4"/> Dashboard</button>
+                        <button onClick={() => setActiveTab('admin_events')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_events' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Calendar className="w-4 h-4"/> Event Manager</button>
+                        <button onClick={() => setActiveTab('admin_fighters')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_fighters' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Users className="w-4 h-4"/> Fighter Manager</button>
+                        <button onClick={() => setActiveTab('admin_promotions')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_promotions' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Globe className="w-4 h-4"/> Promotion Manager</button>
+                        <button onClick={() => setActiveTab('admin_gyms')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_gyms' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Building2 className="w-4 h-4"/> Gym Manager</button>
+                        <button onClick={() => setActiveTab('admin_weight_classes')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_weight_classes' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Scale className="w-4 h-4"/> Weight Classes</button>
+                        <button onClick={() => setActiveTab('admin_belts')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_belts' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Crown className="w-4 h-4"/> Belt Manager</button>
+                        <button onClick={() => setActiveTab('admin_styles')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_styles' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><Swords className="w-4 h-4"/> Style Manager</button>
+                        <button onClick={() => setActiveTab('admin_referees')} className={`flex items-center gap-2 px-4 py-2 rounded font-bold whitespace-nowrap ${activeTab === 'admin_referees' ? 'bg-yellow-500 text-black' : 'bg-slate-800 text-slate-400'}`}><UserCheck className="w-4 h-4"/> Referee Manager</button>
                     </div>
                 )}
 
-                {/* Views */}
                 {activeTab === 'rankings' && renderRankings()}
                 {activeTab === 'events' && renderEvents()}
                 {activeTab === 'admin_dashboard' && <AdminDashboard />}
@@ -2826,64 +2851,29 @@ const App = () => {
                 {activeTab === 'admin_weight_classes' && <AdminWeightManager />}
                 {activeTab === 'admin_events' && <AdminEventManager />}
                 {activeTab === 'admin_belts' && <AdminBeltManager />}
+                {activeTab === 'admin_styles' && <AdminFightingStyleManager />}
+                {activeTab === 'admin_referees' && <AdminRefereeManager />}
             </>
         )}
       </main>
 
-      {/* MOBILE BOTTOM NAV */}
       <div className="md:hidden fixed bottom-0 left-0 w-full bg-slate-900 border-t border-slate-800 z-50 pb-safe">
         <div className="flex justify-around items-center h-16">
-            <button 
-                onClick={resetToRankings} 
-                className={`flex flex-col items-center gap-1 ${activeTab === 'rankings' && !searchQuery ? 'text-yellow-500' : 'text-slate-500'}`}
-            >
-                <Trophy className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase">Rankings</span>
-            </button>
-            <button 
-                onClick={resetToEvents} 
-                className={`flex flex-col items-center gap-1 ${activeTab === 'events' && !searchQuery ? 'text-yellow-500' : 'text-slate-500'}`}
-            >
-                <Calendar className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase">Events</span>
-            </button>
-            
+            <button onClick={resetToRankings} className={`flex flex-col items-center gap-1 ${activeTab === 'rankings' && !searchQuery ? 'text-yellow-500' : 'text-slate-500'}`}><Trophy className="w-6 h-6" /><span className="text-[10px] font-bold uppercase">Rankings</span></button>
+            <button onClick={resetToEvents} className={`flex flex-col items-center gap-1 ${activeTab === 'events' && !searchQuery ? 'text-yellow-500' : 'text-slate-500'}`}><Calendar className="w-6 h-6" /><span className="text-[10px] font-bold uppercase">Events</span></button>
             {isAdminMode ? (
-                <button 
-                    onClick={() => { setActiveTab('admin_dashboard'); setSearchQuery(''); }} 
-                    className={`flex flex-col items-center gap-1 ${activeTab.startsWith('admin_') ? 'text-yellow-500' : 'text-slate-500'}`}
-                >
-                    <Activity className="w-6 h-6" />
-                    <span className="text-[10px] font-bold uppercase">Dashboard</span>
-                </button>
+                <button onClick={() => { setActiveTab('admin_dashboard'); setSearchQuery(''); }} className={`flex flex-col items-center gap-1 ${activeTab.startsWith('admin_') ? 'text-yellow-500' : 'text-slate-500'}`}><Activity className="w-6 h-6" /><span className="text-[10px] font-bold uppercase">Dashboard</span></button>
             ) : (
-                <button 
-                    onClick={() => setShowLogin(true)} 
-                    className="flex flex-col items-center gap-1 text-slate-500"
-                >
-                    <Lock className="w-6 h-6" />
-                    <span className="text-[10px] font-bold uppercase">Staff</span>
-                </button>
+                <button onClick={() => setShowLogin(true)} className="flex flex-col items-center gap-1 text-slate-500"><Lock className="w-6 h-6" /><span className="text-[10px] font-bold uppercase">Staff</span></button>
             )}
         </div>
       </div>
       
-      {/* Footer Branding */}
       <footer className="mt-20 border-t border-slate-800 py-12 text-center text-slate-500 mb-16 md:mb-0">
-          <div className="flex justify-center items-center gap-2 mb-4 opacity-50">
-             <div className="h-px bg-slate-700 w-12"></div>
-             <Shield className="w-4 h-4"/>
-             <div className="h-px bg-slate-700 w-12"></div>
-          </div>
+          <div className="flex justify-center items-center gap-2 mb-4 opacity-50"><div className="h-px bg-slate-700 w-12"></div><Shield className="w-4 h-4"/><div className="h-px bg-slate-700 w-12"></div></div>
           <h3 className="text-white font-black italic text-lg mb-2">BAYOU FIGHT NIGHT</h3>
           <p className="max-w-md mx-auto text-sm mb-6">Louisiana MMA, regional fighters, and combat sports culture across the Gulf South. No hype. Just fights.</p>
-          <div className="flex justify-center gap-6 text-xs uppercase tracking-widest font-bold">
-              <span>Clips & Highlights</span>
-              <span>•</span>
-              <span>Fighter Profiles</span>
-              <span>•</span>
-              <span>Louisiana Culture</span>
-          </div>
+          <div className="flex justify-center gap-6 text-xs uppercase tracking-widest font-bold"><span>Clips & Highlights</span><span>•</span><span>Fighter Profiles</span><span>•</span><span>Louisiana Culture</span></div>
       </footer>
     </div>
   );
